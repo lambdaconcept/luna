@@ -27,7 +27,7 @@ class GetMicrosoftDescriptorHandlerBlock(Elaboratable):
         O: stall          -- Pulsed if a STALL handshake should be generated, instead of a response.
     """
 
-    ELEMENT_SIZE = 4
+    ELEMENT_SIZE = 1
 
     COUNT_SIZE_BITS   = 16
     ADDRESS_SIZE_BITS = 16
@@ -110,15 +110,12 @@ class GetMicrosoftDescriptorHandlerBlock(Elaboratable):
         max_descriptor_size     = 0
 
         # Our ROM starts with a collection of pointers to our various descriptor tables...
-        rom_size_table_pointers = indexes_count * self.ELEMENT_SIZE
+        rom_size_table_pointers = indexes_count * 4
 
         # ... and the descriptors themselves.
         rom_size_descriptors = 0
         for raw_descriptor in descriptors.values():
-
-            # Compute the maximum size for each descriptor...
-            aligned_size = self._align_to_element_size(len(raw_descriptor))
-            rom_size_descriptors += aligned_size * self.ELEMENT_SIZE
+            rom_size_descriptors += len(raw_descriptor)
 
             # ... and store the maximum size we've encountered.
             max_descriptor_size = max(max_descriptor_size, len(raw_descriptor))
@@ -142,17 +139,16 @@ class GetMicrosoftDescriptorHandlerBlock(Elaboratable):
             pointer_bytes = struct.pack(">HH", len(raw_descriptor), next_free_address)
 
             # ... figure out where in the ROM we're going to store the pointer ...
-            index_base_address = (index - min_index_number) * self.ELEMENT_SIZE
+            index_base_address = (index - min_index_number) * len(pointer_bytes)
 
             # ... add the pointer...
-            rom[index_base_address:index_base_address + 4] = pointer_bytes
+            rom[index_base_address:index_base_address + len(pointer_bytes)] = pointer_bytes
 
             # ... and then store the descriptor itself to the pointer address.
             rom[next_free_address:next_free_address+len(raw_descriptor)] = raw_descriptor
 
             # Figure out the next free position for a descriptor.
-            aligned_size = self._align_to_element_size(len(raw_descriptor))
-            next_free_address += aligned_size * self.ELEMENT_SIZE
+            next_free_address += len(raw_descriptor)
 
         assert total_size == len(rom)
 
@@ -167,7 +163,7 @@ class GetMicrosoftDescriptorHandlerBlock(Elaboratable):
         rom_entries = (rom[(element_size * i):(element_size * i) + element_size] for i in range(total_elements))
 
         # ... and then convert that into an initializer value in the format Amaranth ROMs like (integers).
-        initializer = [struct.unpack(">I", rom_entry)[0] for rom_entry in rom_entries]
+        initializer = [struct.unpack("B", rom_entry)[0] for rom_entry in rom_entries]
 
         return initializer, max_descriptor_size, max_index_number, min_index_number
 
@@ -182,21 +178,8 @@ class GetMicrosoftDescriptorHandlerBlock(Elaboratable):
         #
         rom_content, descriptor_max_length, max_index, min_index = self.generate_rom_content()
 
-        rom = Memory(width=32, depth=len(rom_content), init=rom_content)
+        rom = Memory(width=8, depth=len(rom_content), init=rom_content)
         m.submodules.rom_read_port = rom_read_port = rom.read_port(transparent=False)
-
-        # Create convenience aliases to the upper and lower half of the ROM.
-        rom_upper_half = rom_read_port.data.word_select(1, 16)
-        rom_lower_half = rom_read_port.data.word_select(0, 16)
-
-        # All of our ROM's metadata is composed of elements formatted as (count, pointer).
-        # Grab a quick reference to the ROM's upper half, which stores the count...
-        rom_element_count    = rom_upper_half
-
-        # ... and to the ROM's lower half, not counting the last two bits (which are always 0,
-        # as our pointers are always aligned). This creates an element pointer counted in words,
-        # instead of in bytes; and thus one compatible with our read_port addr.
-        rom_element_pointer  = rom_read_port.data.bit_select(2, rom_read_port.addr.width)
 
         #
         # Figure out the maximum length we're willing to send.
@@ -220,14 +203,19 @@ class GetMicrosoftDescriptorHandlerBlock(Elaboratable):
         bytes_sent = Signal.like(length)
 
         # Registers that store descriptor length and data base address.
-        descriptor_length = Signal(16)
+        descriptor_data_end_address = Signal(rom_read_port.addr.width)
         descriptor_data_base_address = Signal(rom_read_port.addr.width)
 
         # Track when we're on the first and last packet.
         on_first_packet = position_in_stream == self.start_position
         on_last_packet = \
-            (position_in_stream == (descriptor_length - 1)) | \
+            (position_in_stream == descriptor_data_end_address) | \
             (bytes_sent + 1 >= length)
+
+        m.d.comb += [
+            rom_read_port.addr.eq(descriptor_data_base_address),
+            self.tx.payload   .eq(rom_read_port.data),
+        ]
 
         #
         # Core transmit logic.
@@ -241,73 +229,43 @@ class GetMicrosoftDescriptorHandlerBlock(Elaboratable):
                 # Reset our data-sent count...
                 m.d.sync += bytes_sent.eq(0)
 
-                # ... and always prepare to read whatever descriptor type is requested.
-                m.d.comb += rom_read_port.addr.eq(index - min_index)
-
                 # Once we have a request to start transmitting...
                 with m.If(self.start):
                     m.next = 'START'
 
             # START -- retiming state to allow construction of the length signal
             with m.State('START'):
-                # ... and always prepare to read whatever descriptor type is requested.
-                m.d.comb += rom_read_port.addr.eq(index - min_index)
-
                 # ... apply our start position...
-                m.d.sync += position_in_stream.eq(self.start_position),
+                m.d.sync += position_in_stream.eq(self.start_position)
 
-                is_valid_index = (min_index <= index) & (index <= max_index)
+                def parse_descriptor_rom(rom, entries_count):
+                    for i in range(entries_count):
+                        length, ptr = struct.unpack(">HH", bytes(rom[i*4:(i+1)*4]))
+                        yield i, length, ptr
 
-                # If we have a descriptor we're able to send, prepare to send it.
-                with m.If(is_valid_index):
-                    m.next = 'LOOKUP_DESCRIPTOR'
-
-                # Otherwise, stall the request immediately.
-                with m.Else():
-                    m.d.comb += self.stall.eq(1)
-                    m.next = 'IDLE'
-
-
-            # LOOKUP_DESCRIPTOR -- we've now fetched from ROM the location of the descriptor in memory.
-            # We'll decode it, and then prepare to start sending the descriptor.
-            # descriptor from memory. First, we'll need to find the location of the table that contains each
-            # descriptor pointer.
-            with m.State('LOOKUP_DESCRIPTOR'):
-
-                # Point our descriptor at the first word in our descriptor, offset by our current position
-                # in the stream...
-                m.d.comb += rom_read_port.addr.eq((rom_read_port.data + position_in_stream) >> 2)
-
-                # ... and register the position and shape of our descriptor in memory.
-                m.d.sync += [
-                    descriptor_data_base_address  .eq(rom_element_pointer),
-                    descriptor_length             .eq(rom_element_count),
-                ]
-
-                # Our current position may point out of bounds in case our descriptor length is a multiple
-                # of the maximum packet size. We must send a ZLP now so the host knows the previous
-                # packet was the end of the descriptor.
-                with m.If(rom_element_count == 0):
-                    m.d.comb += self.stall.eq(1)
-                    m.next = 'IDLE'
-                with m.Elif(position_in_stream >= rom_element_count):
-                    m.next = 'SEND_ZLP'
-                with m.Else():
-                    m.next = 'SEND_DESCRIPTOR'
-
+                with m.Switch(index):
+                    for descriptor_index, length, ptr in parse_descriptor_rom(rom_content, max_index - min_index + 1):
+                        with m.Case(min_index + descriptor_index):
+                            with m.If(length == 0):
+                                m.d.comb += self.stall.eq(1)
+                                m.next = 'IDLE'
+                            with m.Elif(self.start_position >= length):
+                                m.next = 'SEND_ZLP'
+                            with m.Else():
+                                m.d.sync += [
+                                    descriptor_data_base_address.eq(ptr),
+                                    descriptor_data_end_address .eq(ptr + length - 1),
+                                ]
+                                m.next = 'SEND_DESCRIPTOR'
+                    with m.Default():
+                        m.d.comb += self.stall.eq(1)
+                        m.next = 'IDLE'
 
             # SEND_DESCRIPTOR -- we finally are actively streaming our descriptor; which we'll complete until
             # our descriptor is fully sent.
             with m.State('SEND_DESCRIPTOR'):
-                word_in_stream = position_in_stream >> 2
-                byte_in_stream = position_in_stream.bit_select(0, 2)
-
                 m.d.comb += [
                     self.tx.valid       .eq(1),
-
-                    # Always drive the stream from our current memory output...
-                    rom_read_port.addr  .eq(descriptor_data_base_address + word_in_stream),
-                    self.tx.payload     .eq(rom_read_port.data.word_select(~byte_in_stream, 8)),
 
                     # ... and base First and Last based on our current position in the stream.
                     self.tx.first       .eq(on_first_packet),
@@ -316,22 +274,14 @@ class GetMicrosoftDescriptorHandlerBlock(Elaboratable):
 
                 # Once a given word is accepted, we're ready to move on.
                 with m.If(self.tx.ready):
+                    m.d.sync += [
+                        descriptor_data_base_address.eq(descriptor_data_base_address + 1),
+                        position_in_stream  .eq(position_in_stream + 1),
+                        bytes_sent          .eq(bytes_sent + 1),
+                    ]
 
                     # If we're not yet done, move to the next byte in the stream.
-                    with m.If(~on_last_packet):
-                        m.d.sync += [
-                            position_in_stream  .eq(position_in_stream + 1),
-                            bytes_sent          .eq(bytes_sent + 1),
-                        ]
-                        m.d.comb += rom_read_port.addr.eq(descriptor_data_base_address+(position_in_stream + 1).bit_select(2, position_in_stream.width - 2)),
-
-                    # Otherwise, we've finished! Return to IDLE.
-                    with m.Else():
-                        # Reset some values, might not be really required
-                        m.d.sync += [
-                            descriptor_length             .eq(0),
-                            descriptor_data_base_address  .eq(0)
-                        ]
+                    with m.If(on_last_packet):
                         m.next = 'IDLE'
 
             # SEND_ZLP -- we've had an empty descriptor request, or a request that ended on a packet boundary.
