@@ -14,7 +14,7 @@ from amaranth       import Elaboratable, Module, Signal
 
 from ..endpoint     import EndpointInterface
 from ...stream      import StreamInterface, USBOutStreamBoundaryDetector
-from ..transfer     import USBInTransferManager
+from ..transfer     import USBInTransferManager, USBInTransferBuffer
 from ....memory     import TransactionalizedFIFO
 
 
@@ -57,13 +57,20 @@ class USBStreamInEndpoint(Elaboratable):
     max_packet_size: int
         The maximum packet size for this endpoint. Should match the wMaxPacketSize provided in the
         USB endpoint descriptor.
+    bufferize_output: bool
+        Without an output register, the data read from the memory array of USBInTransferManager
+        is directly passed as a combinatorial statement to the output tx interface
+        which may force the allocation of LUT RAM instead of Block RAM on some devices.
+        Here we offer the possibility to use a synchronous buffer which introduces
+        an additional clock cycle delay at the output.
     """
 
 
-    def __init__(self, *, endpoint_number, max_packet_size):
+    def __init__(self, *, endpoint_number, max_packet_size, bufferize_output=False):
 
         self._endpoint_number = endpoint_number
         self._max_packet_size = max_packet_size
+        self._bufferize_output = bufferize_output
 
         #
         # I/O port
@@ -80,6 +87,14 @@ class USBStreamInEndpoint(Elaboratable):
 
         # Create our transfer manager, which will be used to sequence packet transfers for our stream.
         m.submodules.tx_manager = tx_manager = USBInTransferManager(self._max_packet_size)
+
+        # Create a synchronous buffer as required
+        if self._bufferize_output:
+            m.submodules.buffer = buffer = USBInTransferBuffer()
+            m.d.comb += buffer.sink.stream_eq(tx_manager.packet_stream)
+            packet_stream = buffer.source
+        else:
+            packet_stream = tx_manager.packet_stream
 
         # Check there has been a ClearFeature(ENDPOINT_HALT) request address to this endpoint.
         clear_endpoint_halt = \
@@ -103,7 +118,7 @@ class USBStreamInEndpoint(Elaboratable):
             tx_manager.reset_sequence   .eq(clear_endpoint_halt),
 
             # ... and our output stream...
-            interface.tx                .stream_eq(tx_manager.packet_stream),
+            interface.tx                .stream_eq(packet_stream),
             interface.tx_pid_toggle     .eq(tx_manager.data_pid),
 
             # ... and connect through our token/handshake signals.

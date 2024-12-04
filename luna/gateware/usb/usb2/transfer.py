@@ -16,6 +16,24 @@ from .packet          import HandshakeExchangeInterface, TokenDetectorInterface
 from ..stream         import USBInStreamInterface
 from ...stream        import StreamInterface
 
+
+class USBInTransferBuffer(Elaboratable):
+    """ Buffered interface to improve timings allow block ram allocation.
+    """
+    def __init__(self):
+        self.sink   = USBInStreamInterface()
+        self.source = USBInStreamInterface()
+
+    def elaborate(self, platform):
+        m = Module()
+
+        with m.If(~self.source.valid | self.source.ready):
+            m.d.usb  += self.source.stream_eq(self.sink, omit={'ready'})
+            m.d.comb += self.sink.ready.eq(1)
+
+        return m
+
+
 class USBInTransferManager(Elaboratable):
     """ Sequencer that converts a long data stream (a USB *transfer*) into a burst of USB packets.
 
