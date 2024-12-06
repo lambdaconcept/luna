@@ -254,7 +254,13 @@ class GetDescriptorHandlerBlock(Elaboratable):
         # For now, we only support layouts with consecutive indexes.
         # Ensure this is the case.
         for type_number, indexes in sorted(descriptors.items()):
+            if len(indexes) == 0:
+                continue
+            for i in range(1, max(indexes.keys()) + 1):
+                if i not in indexes.keys():
+                    indexes[i] = {}
             assert max(indexes.keys()) == len(indexes) - 1, "descriptors have non-contiguous indices!"
+            descriptors[type_number] = indexes
 
 
         #
@@ -318,7 +324,10 @@ class GetDescriptorHandlerBlock(Elaboratable):
             for index, raw_descriptor in sorted(descriptor_set.items()):
 
                 # Create our descriptor pointer entries...
-                pointer_bytes = struct.pack(">HH", len(raw_descriptor), next_free_address)
+                if isinstance(raw_descriptor, dict):
+                    pointer_bytes = b"\xFF\xFF\xFF\xFF"
+                else:
+                    pointer_bytes = struct.pack(">HH", len(raw_descriptor), next_free_address)
 
                 # ... figure out where in the ROM we're going to store the pointer ...
                 index_base_address = type_index_base_address[type_number] + index * self.ELEMENT_SIZE
@@ -327,7 +336,8 @@ class GetDescriptorHandlerBlock(Elaboratable):
                 rom[index_base_address:index_base_address + 4] = pointer_bytes
 
                 # ... and then store the descriptor itself to the pointer address.
-                rom[next_free_address:next_free_address+len(raw_descriptor)] = raw_descriptor
+                if not isinstance(raw_descriptor, dict):
+                    rom[next_free_address:next_free_address+len(raw_descriptor)] = raw_descriptor
 
                 # Figure out the next free position for a descriptor.
                 aligned_size = self._align_to_element_size(len(raw_descriptor))
@@ -353,6 +363,22 @@ class GetDescriptorHandlerBlock(Elaboratable):
 
     def elaborate(self, platform) -> Module:
         m = Module()
+
+        descriptors = {}
+        for type_number, index, raw_descriptor in self._descriptors:
+            if type_number not in descriptors:
+                descriptors[type_number] = {}
+
+            descriptors[type_number][index] = raw_descriptor
+
+        skip_list = []
+        for type_number, indexes in sorted(descriptors.items()):
+            if len(indexes) == 0:
+                continue
+            for i in range(1, max(indexes.keys()) + 1):
+                if i not in indexes.keys():
+                    skip_list.append(type_number << 8 | i)
+        print("skip:", skip_list)
 
         # Aliases for type/index
         type_number = Signal(8)
@@ -445,8 +471,12 @@ class GetDescriptorHandlerBlock(Elaboratable):
                 is_valid_type = (type_number <= max_type_index)
 
                 # If we have a descriptor we're able to send, prepare to send it.
-                with m.If(is_valid_type):
-                    m.next = 'LOOKUP_TYPE'
+                if len(skip_list) > 0:
+                    with m.If(is_valid_type & ~self.value.matches(*skip_list)):
+                        m.next = 'LOOKUP_TYPE'
+                else:
+                    with m.If(is_valid_type):
+                        m.next = 'LOOKUP_TYPE'
 
                 # Otherwise, stall the request immediately.
                 with m.Else():
