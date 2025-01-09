@@ -402,7 +402,7 @@ class USBStreamOutEndpoint(Elaboratable):
             ),
 
             # Our stream data always comes directly out of the FIFO; and is valid
-            # henever our FIFO actually has data for us to read.
+            # whenever our FIFO actually has data for us to read.
             stream.valid      .eq(~fifo.empty),
             stream.payload    .eq(fifo.read_data[0:8]),
 
@@ -449,4 +449,3 @@ class USBStreamOutEndpoint(Elaboratable):
 
 
         return m
-
