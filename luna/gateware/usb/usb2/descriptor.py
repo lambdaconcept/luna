@@ -378,6 +378,7 @@ class GetDescriptorHandlerBlock(Elaboratable):
             for i in range(1, max(indexes.keys()) + 1):
                 if i not in indexes.keys():
                     skip_list.append(type_number << 8 | i)
+        print("skip:", skip_list)
 
         # Aliases for type/index
         type_number = Signal(8)
