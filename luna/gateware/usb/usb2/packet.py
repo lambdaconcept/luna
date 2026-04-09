@@ -10,19 +10,20 @@
 import operator
 import functools
 
-from amaranth          import Signal, Module, Elaboratable, Cat, Array, Const
-from amaranth.hdl.rec  import Record, DIR_FANIN, DIR_FANOUT
+from amaranth            import Signal, Module, Elaboratable, Cat, Array, Const
+from amaranth.lib.wiring import Signature, In, Out
 
-from .                 import USBSpeed, USBPacketID
-from ..stream          import USBInStreamInterface, USBOutStreamInterface
-from ...interface.utmi import UTMITransmitInterface
+from .                   import USBSpeed, USBPacketID
+from ..stream            import USBInStreamInterface, USBOutStreamInterface
+from ...interface.utmi   import UTMITransmitInterface
+from ...utils.compat     import LunaInterface
 
 #
 # Interfaces.
 #
 
 
-class HandshakeExchangeInterface(Record):
+class HandshakeExchangeInterface(LunaInterface):
     """ Record that carries handshakes detected -or- generated between modules.
 
     Attributes
@@ -48,18 +49,16 @@ class HandshakeExchangeInterface(Record):
     """
 
     def __init__(self, *, is_detector):
-        direction = DIR_FANOUT if is_detector else DIR_FANOUT
-
-        super().__init__([
-            ('ack',   1, direction),
-            ('nak',   1, direction),
-            ('stall', 1, direction),
-            ('nyet',  1, direction),
-        ])
+        super().__init__(Signature({
+            'ack':   Out(1),
+            'nak':   Out(1),
+            'stall': Out(1),
+            'nyet':  Out(1),
+        }))
 
 
 
-class DataCRCInterface(Record):
+class DataCRCInterface(LunaInterface):
     """ Record providing an interface to a USB CRC-16 generator.
 
     Attributes
@@ -70,14 +69,16 @@ class DataCRCInterface(Record):
         The current CRC-16 value; updated with each sent or received byte.
     """
 
+    signature = Signature({
+        'start': In(1),
+        'crc':   Out(16),
+    })
+
     def __init__(self):
-        super().__init__([
-            ('start', 1,  DIR_FANIN),
-            ('crc',   16, DIR_FANOUT)
-        ])
+        super().__init__()
 
 
-class TokenDetectorInterface(Record):
+class TokenDetectorInterface(LunaInterface):
     """ Record providing an interface to a USB token detector.
 
     Attributes
@@ -110,25 +111,27 @@ class TokenDetectorInterface(Record):
         High iff the current token is a PING.
     """
 
+    signature = Signature({
+        'pid':                Out(4),
+        'address':            Out(7),
+        'endpoint':           Out(4),
+        'new_token':          Out(1),
+        'ready_for_response': Out(1),
+
+        'frame':              Out(11),
+        'new_frame':          Out(1),
+
+        'is_in':              Out(1),
+        'is_out':             Out(1),
+        'is_setup':           Out(1),
+        'is_ping':            Out(1),
+    })
+
     def __init__(self):
-        super().__init__([
-            ('pid',                4, DIR_FANOUT),
-            ('address',            7, DIR_FANOUT),
-            ('endpoint',           4, DIR_FANOUT),
-            ('new_token',          1, DIR_FANOUT),
-            ('ready_for_response', 1, DIR_FANOUT),
-
-            ('frame',             11, DIR_FANOUT),
-            ('new_frame',          1, DIR_FANOUT),
-
-            ('is_in',              1, DIR_FANOUT),
-            ('is_out',             1, DIR_FANOUT),
-            ('is_setup',           1, DIR_FANOUT),
-            ('is_ping',            1, DIR_FANOUT),
-        ])
+        super().__init__()
 
 
-class InterpacketTimerInterface(Record):
+class InterpacketTimerInterface(LunaInterface):
     """ Record providing an interface to our interpacket timer.
 
     See [USB2.0: 7.1.18] and the USBInterpacketTimer gateware for more information.
@@ -146,14 +149,16 @@ class InterpacketTimerInterface(Record):
         Strobe that goes high when the receive-after-transmit window has passed.
     """
 
-    def __init__(self):
-        super().__init__([
-            ('start',      1, DIR_FANIN),
+    signature = Signature({
+        'start':      In(1),
 
-            ('tx_allowed', 1, DIR_FANOUT),
-            ('tx_timeout', 1, DIR_FANOUT),
-            ('rx_timeout', 1, DIR_FANOUT),
-        ])
+        'tx_allowed': Out(1),
+        'tx_timeout': Out(1),
+        'rx_timeout': Out(1),
+    })
+
+    def __init__(self):
+        super().__init__()
 
 
     def attach(self, *subordinates):
@@ -1460,4 +1465,3 @@ class USBInterpacketTimer(Elaboratable):
 
 
         return m
-

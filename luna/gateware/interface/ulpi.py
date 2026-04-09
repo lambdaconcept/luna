@@ -7,27 +7,46 @@
 
 """ ULPI interfacing hardware. """
 
-from amaranth       import Signal, Module, Cat, Elaboratable, ClockSignal, \
-                           Record, ResetSignal, Const
-from amaranth.hdl.rec import Record, DIR_FANIN, DIR_FANOUT, DIR_NONE
+from amaranth            import Signal, Module, Cat, Elaboratable, ClockSignal, \
+                                ResetSignal, Const
+from amaranth.lib.wiring import Signature, In, Out
 
-from ..utils.io     import delay
+from ..utils.io          import delay
+from ..utils.compat      import LunaInterface
 
 
-class ULPIInterface(Record):
-    """ Record that represents a standard ULPI interface. """
+class _ULPIDataSubInterface:
+    """ Sub-interface for ULPI data lines (i/o/oe). """
+    def __init__(self, intf):
+        self.i  = intf.data_i
+        self.o  = intf.data_o
+        self.oe = intf.data_oe
 
-    LAYOUT = [
-        ('data', [('i', 8, DIR_FANIN), ('o', 8, DIR_FANOUT), ('oe', 1, DIR_FANOUT)]),
-        ('clk', 1, DIR_FANOUT),
-        ('nxt', 1, DIR_FANIN),
-        ('stp', 1, DIR_FANOUT),
-        ('dir', [('i', 1, DIR_FANIN)]),
-        ('rst', 1, DIR_FANOUT)
-    ]
+class _ULPIDirSubInterface:
+    """ Sub-interface for ULPI dir line. """
+    def __init__(self, intf):
+        self.i = intf.dir_i
+
+
+class ULPIInterface(LunaInterface):
+    """ Interface that represents a standard ULPI interface. """
+
+    signature = Signature({
+        'data_i':  Out(8),
+        'data_o':  Out(8),
+        'data_oe': Out(1),
+        'clk':     Out(1),
+        'nxt':     Out(1),
+        'stp':     Out(1),
+        'dir_i':   Out(1),
+        'rst':     Out(1),
+    })
 
     def __init__(self):
-        super().__init__(self.LAYOUT)
+        super().__init__()
+        # Provide nested attribute access for compatibility (ulpi.data.i, ulpi.dir.i)
+        self.data = _ULPIDataSubInterface(self)
+        self.dir  = _ULPIDirSubInterface(self)
 
 
 

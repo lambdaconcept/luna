@@ -6,10 +6,12 @@
 """ Request components shared between USB2 and USB3. """
 
 from amaranth       import *
-from amaranth.hdl.rec import DIR_FANOUT
+from amaranth.lib.wiring import Signature, Out
+
+from ...utils.compat import LunaInterface
 
 
-class SetupPacket(Record):
+class SetupPacket(LunaInterface):
     """ Record capturing the content of a setup packet.
 
     Components (O = output from setup parser; read-only input to others):
@@ -26,26 +28,27 @@ class SetupPacket(Record):
         O: length[16]    -- Length of the relevant setup request.
     """
 
+    signature = Signature({
+        # Byte 1
+        'recipient':      Out(5),
+        'type':           Out(2),
+        'is_in_request':  Out(1),
+
+        # Byte 2
+        'request':        Out(8),
+
+        # Byte 3/4
+        'value':          Out(16),
+
+        # Byte 5/6
+        'index':          Out(16),
+
+        # Byte 7/8
+        'length':         Out(16),
+
+        # Control signaling.
+        'received':       Out(1),
+    })
+
     def __init__(self):
-        super().__init__([
-            # Byte 1
-            ('recipient',      5, DIR_FANOUT),
-            ('type',           2, DIR_FANOUT),
-            ('is_in_request',  1, DIR_FANOUT),
-
-            # Byte 2
-            ('request',        8, DIR_FANOUT),
-
-            # Byte 3/4
-            ('value',         16, DIR_FANOUT),
-
-            # Byte 5/6
-            ('index',         16, DIR_FANOUT),
-
-            # Byte 7/8
-            ('length',        16, DIR_FANOUT),
-
-            # Control signaling.
-            ('received',       1, DIR_FANOUT),
-        ])
-
+        super().__init__()

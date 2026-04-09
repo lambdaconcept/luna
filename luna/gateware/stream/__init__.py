@@ -6,11 +6,13 @@
 
 """ Core stream definitions. """
 
-from amaranth         import Elaboratable, Signal, Module
-from amaranth.hdl.rec import Record, DIR_FANIN, DIR_FANOUT
+from amaranth            import Elaboratable, Signal, Module
+from amaranth.lib.wiring import Signature, In, Out
+
+from ..utils.compat      import LunaInterface
 
 
-class StreamInterface(Record):
+class StreamInterface(LunaInterface):
     """ Simple record implementing a unidirectional data stream.
 
     This class is similar to LiteX's streams; but instances may be optimized for
@@ -54,23 +56,27 @@ class StreamInterface(Record):
         # ... store our extra fields...
         self._extra_fields = extra_fields
 
-        # ... and create our basic stream.
-        super().__init__([
-            ('valid',    valid_width),
-            ('ready',    1),
+        # Build signature dynamically based on parameters.
+        members = {
+            'valid':   Out(valid_width),
+            'ready':   Out(1),
+            'first':   Out(1),
+            'last':    Out(1),
+            'payload': Out(payload_width),
+        }
+        for field_def in extra_fields:
+            name = field_def[0]
+            width = field_def[1]
+            members[name] = Out(width)
 
-            ('first',    1),
-            ('last',     1),
-
-            ('payload',  payload_width),
-            *extra_fields
-        ])
+        super().__init__(Signature(members))
 
 
     def attach(self, interface, omit=None):
         # Create lists of fields to be copied -to- the interface (RHS fields),
         # and lists of fields to be copied -from- the interface (LHS fields).
-        rhs_fields = ['valid', 'first', 'last', 'payload', *self._extra_fields]
+        extra_field_names = [f[0] for f in self._extra_fields]
+        rhs_fields = ['valid', 'first', 'last', 'payload', *extra_field_names]
         lhs_fields = ['ready']
         assignments = []
 
@@ -81,10 +87,10 @@ class StreamInterface(Record):
 
         # Create each of our assignments.
         for field in rhs_fields:
-            assignment = interface[field].eq(self[field])
+            assignment = getattr(interface, field).eq(getattr(self, field))
             assignments.append(assignment)
         for field in lhs_fields:
-            assignment = self[field].eq(interface[field])
+            assignment = getattr(self, field).eq(getattr(interface, field))
             assignments.append(assignment)
 
         return assignments
@@ -122,6 +128,6 @@ class StreamInterface(Record):
         # In some cases, this makes more sense to write; so we'll allow either.
         # Individual sections of the code base should stick to one or the other (please).
         if name == 'data':
-            name = "payload"
+            return self.payload
 
-        return super().__getattr__(name)
+        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")

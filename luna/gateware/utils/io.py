@@ -7,8 +7,7 @@
 
 """ Helpers for I/O interfacing. """
 
-from amaranth import Record, Instance, Module, Signal, Cat
-from amaranth.hdl.rec import DIR_FANIN, DIR_FANOUT
+from amaranth import Instance, Module, Signal, Cat
 
 
 # FIXME: move this out of here and into an ECP5-specific set of functionality

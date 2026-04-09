@@ -12,7 +12,6 @@ import operator
 from amaranth            import Signal, Module, Elaboratable, Cat
 from ...utils.compat     import Encoder
 from amaranth.lib.data   import Struct
-from amaranth.hdl.rec    import Record, DIR_FANOUT
 
 from .                   import USBSpeed
 from .packet             import USBTokenDetector, USBDataPacketDeserializer

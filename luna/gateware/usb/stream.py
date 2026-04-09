@@ -7,11 +7,12 @@
 """ Core stream definitions. """
 
 from amaranth          import Elaboratable, Signal, Module
-from amaranth.hdl.rec  import Record, DIR_FANIN, DIR_FANOUT
-from amaranth.hdl.xfrm import DomainRenamer
+from amaranth.lib.wiring import Signature, Out
+from amaranth.hdl      import DomainRenamer
 
 from ..stream          import StreamInterface
 from ..stream.arbiter  import StreamArbiter
+from ..utils.compat    import LunaInterface
 
 
 class USBInStreamInterface(StreamInterface):
@@ -43,7 +44,7 @@ class USBInStreamInterface(StreamInterface):
 
 
 
-class USBOutStreamInterface(Record):
+class USBOutStreamInterface(LunaInterface):
     """ Variant of LUNA's StreamInterface optimized for USB OUT receipt.
 
     This is a heavily simplified version of our StreamInterface, which omits the 'first',
@@ -66,12 +67,11 @@ class USBOutStreamInterface(Record):
         Parameter:
             payload_width -- The width of the payload packets.
         """
-        super().__init__([
-            ('valid',    1,             DIR_FANOUT),
-            ('next',     1,             DIR_FANOUT),
-
-            ('payload',  payload_width, DIR_FANOUT),
-        ])
+        super().__init__(Signature({
+            'valid':    Out(1),
+            'next':     Out(1),
+            'payload':  Out(payload_width),
+        }))
 
 
     def bridge_to(self, utmi_rx):
@@ -88,7 +88,11 @@ class USBOutStreamInterface(Record):
         """ Generates a list of connections that connect this stream to the provided UTMIReceiveInterface. """
         return self.connect(other)
 
-
+    def __getattr__(self, name):
+        # Allow "data" to be a semantic alias for payload.
+        if name == 'data':
+            return self.payload
+        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
 
 
 class USBOutStreamBoundaryDetector(Elaboratable):

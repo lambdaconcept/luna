@@ -8,19 +8,22 @@
 
 import logging
 
-from amaranth import Signal, Record
-from amaranth.build.res import ResourceError, Subsignal, Resource, Pins
+from amaranth            import Signal
+from amaranth.lib.wiring import Signature, Out
+from amaranth.build.res  import ResourceError, Subsignal, Resource, Pins
+
+from ..utils.compat      import LunaInterface
 
 
-class NullPin(Record):
-    """ Stand-in for a I/O record. """
+class NullPin(LunaInterface):
+    """ Stand-in for a I/O pin. """
 
     def __init__(self, size=1):
-        super().__init__([
-            ('i', size),
-            ('o', size),
-            ('oe', 1),
-        ])
+        super().__init__(Signature({
+            'i':  Out(size),
+            'o':  Out(size),
+            'oe': Out(1),
+        }))
 
 
 class LUNAPlatform:

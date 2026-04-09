@@ -10,8 +10,6 @@ to your own designs; including the core :class:`USBDevice` class.
 
 import logging
 
-from luna                      import configure_default_logging
-
 from amaranth                  import Signal, Module, Elaboratable, Const
 from usb_protocol.emitters     import DeviceDescriptorCollection
 
@@ -119,8 +117,8 @@ class USBDevice(Elaboratable):
             self.utmi       = bus
             self.bus_busy   = Const(0)
             self.translator = None
-            self.always_fs  = True
-            self.data_clock = 12e6
+            self.always_fs  = False
+            self.data_clock = 60e6
 
         #
         # I/O port

@@ -8,10 +8,11 @@
 
 from enum import IntEnum
 
-from amaranth       import Elaboratable, Signal, Module
-from amaranth.hdl.rec import Record, DIR_FANIN, DIR_FANOUT
+from amaranth            import Elaboratable, Signal, Module
+from amaranth.lib.wiring import Signature, In, Out
 
 from ..utils.bus    import OneHotMultiplexer
+from ..utils.compat import LunaInterface
 
 class UTMIOperatingMode:
     """ Enumeration that specifies the modes a UTMI transceiver can use. """
@@ -34,24 +35,21 @@ class UTMITerminationSelect:
     LS_FS_NORMAL = 1
 
 
-class UTMITransmitInterface(Record):
+class UTMITransmitInterface(LunaInterface):
     """ Interface present on hardware that transmits onto a UTMI bus. """
 
-    LAYOUT = [
-
+    signature = Signature({
         # Indicates when the data on tx_data is valid.
-        ('valid', 1, DIR_FANOUT),
-
+        'valid': Out(1),
         # The data to be transmitted.
-        ('data',  8, DIR_FANOUT),
-
+        'data':  Out(8),
         # Pulsed by the UTMI bus when the given data byte will be accepted
         # at the next clock edge.
-        ('ready', 1, DIR_FANIN),
-    ]
+        'ready': In(1),
+    })
 
     def __init__(self):
-        super().__init__(self.LAYOUT)
+        super().__init__()
 
 
     def attach(self, utmi_bus):
@@ -89,38 +87,40 @@ class UTMIInterfaceMultiplexer(OneHotMultiplexer):
 
 
 
-class UTMIInterface(Record):
+class UTMIInterface(LunaInterface):
     """ UTMI+-standardized interface. Intended mostly as a simulation aid."""
 
+    signature = Signature({
+        # Core signals.
+        'rx_data':                     Out(8),
+        'rx_active':                   Out(1),
+        'rx_valid':                    Out(1),
+
+        'tx_data':                     Out(8),
+        'tx_valid':                    Out(1),
+        'tx_ready':                    Out(1),
+
+        # Control signals.
+        'xcvr_select':                 Out(2),
+        'term_select':                 Out(1),
+        'op_mode':                     Out(2),
+        'suspend':                     Out(1),
+        'id_pullup':                   Out(1),
+        'dm_pulldown':                 Out(1),
+        'dp_pulldown':                 Out(1),
+        'chrg_vbus':                   Out(1),
+        'dischrg_vbus':                Out(1),
+        'use_external_vbus_indicator': Out(1),
+
+        # Event signals.
+        'line_state':                  Out(2),
+        'vbus_valid':                  Out(1),
+        'session_valid':               Out(1),
+        'session_end':                 Out(1),
+        'rx_error':                    Out(1),
+        'host_disconnect':             Out(1),
+        'id_digital':                  Out(1),
+    })
+
     def __init__(self):
-        super().__init__([
-            # Core signals.
-            ("rx_data",                     8),
-            ("rx_active",                   1),
-            ("rx_valid",                    1),
-
-            ("tx_data",                     8),
-            ("tx_valid",                    1),
-            ("tx_ready",                    1),
-
-            # Control signals.
-            ('xcvr_select',                 2),
-            ('term_select',                 1),
-            ('op_mode',                     2),
-            ('suspend',                     1),
-            ('id_pullup',                   1),
-            ('dm_pulldown',                 1),
-            ('dp_pulldown',                 1),
-            ('chrg_vbus',                   1),
-            ('dischrg_vbus',                1),
-            ('use_external_vbus_indicator', 1),
-
-            # Event signals.
-            ('line_state',                  2),
-            ('vbus_valid',                  1),
-            ('session_valid',               1),
-            ('session_end',                 1),
-            ('rx_error',                    1),
-            ('host_disconnect',             1),
-            ('id_digital',                  1)
-        ])
+        super().__init__()

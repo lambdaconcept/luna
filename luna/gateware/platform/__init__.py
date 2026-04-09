@@ -13,7 +13,7 @@ import importlib.util
 
 from typing import Optional
 
-from amaranth import Record
+from amaranth.lib.wiring import Signature, Out
 
 from .core import NullPin, LUNAPlatform
 from .toolchain import configure_toolchain
@@ -108,12 +108,17 @@ def get_apollo_platform() -> (Optional[str], Optional[str]):
     return None, None
 
 
-class NullPin(Record):
-    """ Stand-in for a I/O record. """
+class NullPin:
+    """ Stand-in for a I/O pin. """
 
     def __init__(self, size=1):
-        super().__init__([
-            ('i', size),
-            ('o', size),
-            ('oe', 1),
-        ])
+        from ..utils.compat import LunaInterface
+        sig = Signature({
+            'i':  Out(size),
+            'o':  Out(size),
+            'oe': Out(1),
+        })
+        intf = sig.create()
+        self.i = intf.i
+        self.o = intf.o
+        self.oe = intf.oe
