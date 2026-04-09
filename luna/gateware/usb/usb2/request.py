@@ -10,7 +10,7 @@ import functools
 import operator
 
 from amaranth            import Signal, Module, Elaboratable, Cat
-from amaranth.lib.coding import Encoder
+from ...utils.compat     import Encoder
 from amaranth.lib.data   import Struct
 from amaranth.hdl.rec    import Record, DIR_FANOUT
 

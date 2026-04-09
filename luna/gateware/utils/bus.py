@@ -10,7 +10,7 @@ import operator
 import functools
 
 from amaranth            import Elaboratable, Signal, Module
-from amaranth.lib.coding import Encoder
+from .compat             import Encoder
 
 
 class OneHotMultiplexer(Elaboratable):
