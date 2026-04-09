@@ -34,7 +34,7 @@
 
 from amaranth          import Elaboratable, Module, Signal, Cat, Const
 from amaranth.lib.cdc  import FFSynchronizer
-from amaranth.hdl.xfrm import ResetInserter
+from amaranth          import ResetInserter
 
 
 

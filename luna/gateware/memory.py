@@ -10,7 +10,7 @@ This module contains definitions of memory units that work well for USB applicat
 
 from amaranth import Elaboratable, Module, Signal
 from amaranth.lib.memory import Memory
-from amaranth.hdl.xfrm import DomainRenamer
+from amaranth import DomainRenamer
 
 
 class TransactionalizedFIFO(Elaboratable):

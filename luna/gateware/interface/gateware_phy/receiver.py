@@ -35,7 +35,7 @@
 from amaranth          import Elaboratable, Module, Signal, Cat, Const, ClockSignal
 from amaranth.lib.cdc  import FFSynchronizer
 from amaranth.lib.fifo import AsyncFIFOBuffered
-from amaranth.hdl.xfrm import ResetInserter
+from amaranth          import ResetInserter
 
 class RxClockDataRecovery(Elaboratable):
     """RX Clock Data Recovery module.

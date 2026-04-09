@@ -14,7 +14,6 @@ from warnings import warn
 from luna.gateware.test import utils
 
 from amaranth               import *
-from amaranth.hdl.ast       import Value, Const
 from usb_protocol.types     import USBStandardFeatures, USBStandardRequests, USBRequestRecipient, USBRequestType
 from usb_protocol.emitters  import DeviceDescriptorCollection
 
