@@ -13,7 +13,6 @@
 import math
 
 from amaranth import *
-from amaranth.lib.coding import Encoder
 from amaranth.lib.cdc  import PulseSynchronizer
 
 
