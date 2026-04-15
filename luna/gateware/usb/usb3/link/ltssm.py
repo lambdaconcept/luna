@@ -270,7 +270,7 @@ class LTSSMController(wiring.Component):
         #
         # Main Link Training and Status State Machine
         #
-        with m.FSM(domain="ss"):
+        with m.FSM(domain="ss") as fsm:
 
             # Rx.Detect.Reset -- we've just started link bringup post-reset; and are ready to
             # perform any necessary link configuration.
