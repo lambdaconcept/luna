@@ -62,7 +62,7 @@ class LTSSMController(wiring.Component):
 
     phy_ready: In(1)
 
-    tx_electrical_idle: Out(1)
+    tx_electrical_idle: Out(1, init=1)
     engage_terminations: Out(1)  # Actually it's rx_termination…
     invert_rx_polarity: Out(1)
     train_equalizer: Out(1)
@@ -189,7 +189,7 @@ class LTSSMController(wiring.Component):
             m.next = state
 
 
-        def transition_on_timeout(timeout, *, to):
+        def transition_on_timeout(timeout, *, to, ss_affectations=[]):
             """ FSM helper that adds a state transition that is automatically invoked after a timeout. """
 
             # Figure out how many cycles need to pass before we consider ourselves timed out.
@@ -197,6 +197,7 @@ class LTSSMController(wiring.Component):
 
             # If we've reached that many cycles, transition to the target state.
             with m.If(cycles_in_state == timeout_in_cycles):
+                m.d.ss += ss_affectations
                 transition_to_state(to)
 
 
@@ -206,6 +207,7 @@ class LTSSMController(wiring.Component):
             # If we're in USB reset, we're actively receiving warm reset signaling; and we should reset
             # to the Rx.Detect.Reset state.
             with m.If(self.in_usb_reset):
+                m.d.ss += self.tx_electrical_idle.eq(1)
                 transition_to_state("Rx.Detect.Reset")
 
 
@@ -276,10 +278,6 @@ class LTSSMController(wiring.Component):
             # perform any necessary link configuration.
             with m.State("Rx.Detect.Reset"):
                 m.d.comb += [
-
-                    # Keep ourselves from transmitting until we're ready to send...
-                    self.tx_electrical_idle   .eq(1),
-
                     # ... and prevent ourselves from presenting receiver terminations until
                     # our PHY has started up; so the other side doesn't start LFPS polling, yet.
                     self.engage_terminations  .eq(0)
@@ -311,7 +309,6 @@ class LTSSMController(wiring.Component):
             # we don't waste time performing link training if our link isn't there.
             with m.State("Rx.Detect.Active"):
                 m.d.comb += [
-                    self.tx_electrical_idle    .eq(1),
                     self.perform_rx_detection  .eq(1)
                 ]
                 m.d.ss += [
@@ -338,7 +335,7 @@ class LTSSMController(wiring.Component):
             # We'll wait here until our next detection cycle, saving the power of performing
             # continuous detections.
             with m.State("Rx.Detect.Quiet"):
-                m.d.comb += self.tx_electrical_idle.eq(1)
+                m.d.ss += [
                     Assert(self.tx_electrical_idle),
                     Assert(self.engage_terminations),
                     Assert(~self.perform_rx_detection),
@@ -363,8 +360,6 @@ class LTSSMController(wiring.Component):
             # begin exchanging LFPS messages; giving the two sides the opportunity to sync up and
             # establish initial DC characteristics. [USB 3.2r1: 7.5.4.3]
             with m.State("Polling.LFPS"):
-                m.d.comb += self.tx_electrical_idle.eq(1)
-
                 # Continuously send our LFPS polling.
                 m.d.comb += self.send_lfps_polling.eq(1)
                 m.d.ss += [
@@ -389,7 +384,8 @@ class LTSSMController(wiring.Component):
                     # If we see a TS1, and we're not in strict mode, move forward without
                     # necessarily seeing a LFPS burst ourselves.
                     with m.If(self._loosen_requirements & self.ts1_detected):
-                            transition_to_state("Polling.RxEQ")
+                        m.d.ss += self.tx_electrical_idle.eq(0)
+                        transition_to_state("Polling.RxEQ")
 
                     # If this is the first burst we've seen, move our target forward;
                     # so we can meet our second condition.
@@ -401,7 +397,8 @@ class LTSSMController(wiring.Component):
 
                     # If we've sent enough, -and- we meet our condition, move forward.
                     with m.If(lfps_burst_seen):
-                            transition_to_state("Polling.RxEQ")
+                        m.d.ss += self.tx_electrical_idle.eq(0)
+                        transition_to_state("Polling.RxEQ")
 
 
                 # If we haven't yet sent 16 bursts, track how many bursts we have sent.
@@ -415,7 +412,9 @@ class LTSSMController(wiring.Component):
 
                 # If we've never seen polling, we'll exit to Compliance once this passes. [USB 3.2r1: 7.5.4.3]
                 with m.If(~polling_seen):
-                    transition_on_timeout(360e-3, to="Compliance")
+                    transition_on_timeout(360e-3, to="Compliance", ss_affectations=[
+                        self.tx_electrical_idle.eq(0)
+                    ])
                 with m.Else():
                     transition_on_timeout(360e-3, to="SS.Disabled.Default")
 
@@ -613,7 +612,9 @@ class LTSSMController(wiring.Component):
 
                 # If we don't see that logical idle within 2ms, something's gone wrong. We'll need to
                 # start our connection process from the beginning.
-                transition_on_timeout(2e-3, to="Rx.Detect.Reset")
+                transition_on_timeout(2e-3, to="Rx.Detect.Reset", ss_affectations=[
+                    self.tx_electrical_idle.eq(1)
+                ])
 
 
             # U0 -- our primary active USB state, in which we've completed link bringup and now are
@@ -680,7 +681,9 @@ class LTSSMController(wiring.Component):
 
                 # If we don't achieve link training within 12mS, we'll assume that we've lost our
                 # link partner. We'll assume our link is no longer recoverable, and move to inactive.
-                transition_on_timeout(12e-3, to="SS.Inactive.Quiet")
+                transition_on_timeout(12e-3, to="SS.Inactive.Quiet", ss_affectations=[
+                    self.tx_electrical_idle.eq(1)
+                ])
 
                 # We need to at least one burst with the Reset bit set; and then drop out of hot reset.
                 with m.If(self.ts_burst_complete):
@@ -725,7 +728,9 @@ class LTSSMController(wiring.Component):
 
                 # If we don't complete our Idle handshake within 2ms, something's gone wrong.
                 # We'll consider our link irrecoverable.
-                transition_on_timeout(2e-3, to="SS.Inactive.Quiet")
+                transition_on_timeout(2e-3, to="SS.Inactive.Quiet", ss_affectations=[
+                    self.tx_electrical_idle.eq(1)
+                ])
 
 
             # Recovery.Active -- our link is no longer in a reliably usable state; we'll need
@@ -753,7 +758,9 @@ class LTSSMController(wiring.Component):
 
                 # If we don't achieve link training within 12mS, we'll assume that we've lost our
                 # link partner. We'll assume our link is no longer recoverable, and move to inactive.
-                transition_on_timeout(12e-3, to="SS.Inactive.Quiet")
+                transition_on_timeout(12e-3, to="SS.Inactive.Quiet", ss_affectations=[
+                    self.tx_electrical_idle.eq(1)
+                ])
 
                 #
                 # The specification allows us to move on to Polling.Configuration as soon as we
@@ -794,7 +801,9 @@ class LTSSMController(wiring.Component):
 
                 # If we don't achieve link training within 12mS, we'll assume that we've lost our
                 # link partner. We'll assume our link is no longer up, and move to inactive.
-                transition_on_timeout(12e-3, to="SS.Inactive.Quiet")
+                transition_on_timeout(12e-3, to="SS.Inactive.Quiet", ss_affectations=[
+                    self.tx_electrical_idle.eq(1)
+                ])
 
                 # If we've finished sending the requisite amount of TS2s and we've seen TS2s from the
                 # other side, we know that both sides are finished with the core link training.
@@ -873,7 +882,9 @@ class LTSSMController(wiring.Component):
 
                 # If we don't see that logical idle within 2ms, something's gone wrong. We'll
                 # assume we've lost our link partner, and move to SS.Inactive.
-                transition_on_timeout(2e-3, to="SS.Inactive.Quiet")
+                transition_on_timeout(2e-3, to="SS.Inactive.Quiet", ss_affectations=[
+                    self.tx_electrical_idle.eq(1)
+                ])
 
 
             # Compliance -- we've failed link training in such a way as to believe we're in the
@@ -902,6 +913,7 @@ class LTSSMController(wiring.Component):
                 # We'll throw our hands up in despair and re-try link training.
                 # Maybe this time it'll work.
                 transition_to_state("Rx.Detect.Reset")
+                m.d.ss += self.tx_electrical_idle.eq(1)
 
 
             # Loopback -- during the link bringup, our link partner requested that we go into
@@ -931,7 +943,6 @@ class LTSSMController(wiring.Component):
             with m.State("SS.Inactive.Quiet"):
                 handle_warm_resets()
 
-                m.d.comb += self.tx_electrical_idle.eq(1),
                 m.d.ss += [
                     Assert(self.tx_electrical_idle),
                     Assert(self.engage_terminations),
@@ -954,7 +965,6 @@ class LTSSMController(wiring.Component):
                 handle_warm_resets()
 
                 m.d.comb += [
-                    self.tx_electrical_idle    .eq(1),
                     self.perform_rx_detection  .eq(1)
                 ]
                 m.d.ss += [
@@ -988,7 +998,6 @@ class LTSSMController(wiring.Component):
                 handle_warm_resets()
 
                 m.d.comb += [
-                    self.tx_electrical_idle    .eq(1),
                     self.engage_terminations   .eq(0)
                 ]
                 m.d.ss += [
@@ -1014,7 +1023,6 @@ class LTSSMController(wiring.Component):
                 handle_warm_resets()
 
                 m.d.comb += [
-                    self.tx_electrical_idle    .eq(1),
                     self.engage_terminations   .eq(0)
                 ]
                 m.d.ss += [
