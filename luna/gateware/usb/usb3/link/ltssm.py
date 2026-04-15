@@ -62,8 +62,8 @@ class LTSSMController(wiring.Component):
 
     phy_ready: In(1)
 
-    tx_electrical_idle: Out(1, reset=1)
-    engage_terminations: Out(1, reset=1)  # Actually it's rx_termination…
+    tx_electrical_idle: Out(1, init=1)
+    engage_terminations: Out(1, init=1)  # Actually it's rx_termination…
     invert_rx_polarity: Out(1)
     train_equalizer: Out(1)
     disable_scrambling: Out(1)
