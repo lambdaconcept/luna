@@ -284,7 +284,7 @@ class LTSSMController(wiring.Component):
                     # our PHY has started up; so the other side doesn't start LFPS polling, yet.
                     self.engage_terminations  .eq(0)
                 ]
-                m.d.sync += [
+                m.d.ss += [
                     Assert(self.tx_electrical_idle),
                     Assert(~self.engage_terminations),
                     Assert(~self.perform_rx_detection),
@@ -314,7 +314,7 @@ class LTSSMController(wiring.Component):
                     self.tx_electrical_idle    .eq(1),
                     self.perform_rx_detection  .eq(1)
                 ]
-                m.d.sync += [
+                m.d.ss += [
                     Assert(self.tx_electrical_idle),
                     Assert(self.engage_terminations),
                     Assert(self.perform_rx_detection),
@@ -339,7 +339,6 @@ class LTSSMController(wiring.Component):
             # continuous detections.
             with m.State("Rx.Detect.Quiet"):
                 m.d.comb += self.tx_electrical_idle.eq(1)
-                m.d.sync += [
                     Assert(self.tx_electrical_idle),
                     Assert(self.engage_terminations),
                     Assert(~self.perform_rx_detection),
@@ -368,7 +367,7 @@ class LTSSMController(wiring.Component):
 
                 # Continuously send our LFPS polling.
                 m.d.comb += self.send_lfps_polling.eq(1)
-                m.d.sync += [
+                m.d.ss += [
                     Assert(self.tx_electrical_idle),
                     Assert(self.engage_terminations),
                     Assert(~self.perform_rx_detection),
