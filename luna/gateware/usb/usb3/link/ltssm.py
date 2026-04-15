@@ -286,7 +286,16 @@ class LTSSMController(wiring.Component):
                 ]
                 m.d.sync += [
                     Assert(self.tx_electrical_idle),
-                    Assert(~self.engage_terminations)
+                    Assert(~self.engage_terminations),
+                    Assert(~self.perform_rx_detection),
+                    Assert(~self.send_lfps_polling),
+                    Assert(~self.send_tseq_burst),
+                    Assert(~self.train_equalizer),
+                    Assert(~self.send_ts1_burst),
+                    Assert(~self.send_ts2_burst),
+                    Assert(~self.perform_idle_handshake),
+                    Assert(~self.link_ready),
+                    Assert(~self.act_as_loopback),
                 ]
 
 
@@ -307,7 +316,16 @@ class LTSSMController(wiring.Component):
                 ]
                 m.d.sync += [
                     Assert(self.tx_electrical_idle),
-                    Assert(self.perform_rx_detection)
+                    Assert(self.engage_terminations),
+                    Assert(self.perform_rx_detection),
+                    Assert(~self.send_lfps_polling),
+                    Assert(~self.send_tseq_burst),
+                    Assert(~self.train_equalizer),
+                    Assert(~self.send_ts1_burst),
+                    Assert(~self.send_ts2_burst),
+                    Assert(~self.perform_idle_handshake),
+                    Assert(~self.link_ready),
+                    Assert(~self.act_as_loopback),
                 ]
 
                 with m.If(self.link_partner_detected):
@@ -323,6 +341,16 @@ class LTSSMController(wiring.Component):
                 m.d.comb += self.tx_electrical_idle.eq(1)
                 m.d.sync += [
                     Assert(self.tx_electrical_idle),
+                    Assert(self.engage_terminations),
+                    Assert(~self.perform_rx_detection),
+                    Assert(~self.send_lfps_polling),
+                    Assert(~self.send_tseq_burst),
+                    Assert(~self.train_equalizer),
+                    Assert(~self.send_ts1_burst),
+                    Assert(~self.send_ts2_burst),
+                    Assert(~self.perform_idle_handshake),
+                    Assert(~self.link_ready),
+                    Assert(~self.act_as_loopback),
                 ]
 
                 # TODO: count our number of failed attempts; and disable
@@ -337,15 +365,21 @@ class LTSSMController(wiring.Component):
             # establish initial DC characteristics. [USB 3.2r1: 7.5.4.3]
             with m.State("Polling.LFPS"):
                 m.d.comb += self.tx_electrical_idle.eq(1)
-                m.d.sync += [
-                    Assert(self.tx_electrical_idle),
-                ]
-
 
                 # Continuously send our LFPS polling.
                 m.d.comb += self.send_lfps_polling.eq(1)
                 m.d.sync += [
+                    Assert(self.tx_electrical_idle),
+                    Assert(self.engage_terminations),
+                    Assert(~self.perform_rx_detection),
                     Assert(self.send_lfps_polling),
+                    Assert(~self.send_tseq_burst),
+                    Assert(~self.train_equalizer),
+                    Assert(~self.send_ts1_burst),
+                    Assert(~self.send_ts2_burst),
+                    Assert(~self.perform_idle_handshake),
+                    Assert(~self.link_ready),
+                    Assert(~self.act_as_loopback),
                 ]
 
                 # To move forward with the LTSSM, we'll need to:
@@ -397,14 +431,21 @@ class LTSSMController(wiring.Component):
 
                 # Continuously send TSEQs; these are used to perform receiver equalization training.
                 m.d.comb += self.send_tseq_burst.eq(1)
-                m.d.sync += [
-                    Assert(self.send_tseq_burst),
-                ]
 
                 # Request our physical layer to perform equalization training.
                 m.d.comb += self.train_equalizer.eq(1)
                 m.d.sync += [
+                    Assert(~self.tx_electrical_idle),
+                    Assert(self.engage_terminations),
+                    Assert(~self.perform_rx_detection),
+                    Assert(~self.send_lfps_polling),
+                    Assert(self.send_tseq_burst),
                     Assert(self.train_equalizer),
+                    Assert(~self.send_ts1_burst),
+                    Assert(~self.send_ts2_burst),
+                    Assert(~self.perform_idle_handshake),
+                    Assert(~self.link_ready),
+                    Assert(~self.act_as_loopback),
                 ]
 
                 # Once we've sent a full burst of 65536 TSEQs, we can begin our link training handshake.
@@ -422,7 +463,17 @@ class LTSSMController(wiring.Component):
                 # seen enough TS1s to move forward with training.
                 m.d.comb += self.send_ts1_burst.eq(1)
                 m.d.sync += [
+                    Assert(~self.tx_electrical_idle),
+                    Assert(self.engage_terminations),
+                    Assert(~self.perform_rx_detection),
+                    Assert(~self.send_lfps_polling),
+                    Assert(~self.send_tseq_burst),
+                    Assert(~self.train_equalizer),
                     Assert(self.send_ts1_burst),
+                    Assert(~self.send_ts2_burst),
+                    Assert(~self.perform_idle_handshake),
+                    Assert(~self.link_ready),
+                    Assert(~self.act_as_loopback),
                 ]
 
                 # If we don't achieve link training within 12mS, we'll assume that we've lost our
@@ -466,7 +517,17 @@ class LTSSMController(wiring.Component):
                 # advertise that our side has completed link training itself.
                 m.d.comb += self.send_ts2_burst.eq(1)
                 m.d.sync += [
+                    Assert(~self.tx_electrical_idle),
+                    Assert(self.engage_terminations),
+                    Assert(~self.perform_rx_detection),
+                    Assert(~self.send_lfps_polling),
+                    Assert(~self.send_tseq_burst),
+                    Assert(~self.train_equalizer),
+                    Assert(~self.send_ts1_burst),
                     Assert(self.send_ts2_burst),
+                    Assert(~self.perform_idle_handshake),
+                    Assert(~self.link_ready),
+                    Assert(~self.act_as_loopback),
                 ]
 
                 # If we don't achieve link training within 12mS, we'll assume that we've lost our
@@ -490,7 +551,17 @@ class LTSSMController(wiring.Component):
                 # Continue to send TS2s...
                 m.d.comb += self.send_ts2_burst.eq(1)
                 m.d.sync += [
+                    Assert(~self.tx_electrical_idle),
+                    Assert(self.engage_terminations),
+                    Assert(~self.perform_rx_detection),
+                    Assert(~self.send_lfps_polling),
+                    Assert(~self.send_tseq_burst),
+                    Assert(~self.train_equalizer),
+                    Assert(~self.send_ts1_burst),
                     Assert(self.send_ts2_burst),
+                    Assert(~self.perform_idle_handshake),
+                    Assert(~self.link_ready),
+                    Assert(~self.act_as_loopback),
                 ]
 
                 # ... until we've sent a full burst of 16; at which point we can advance.
@@ -512,7 +583,17 @@ class LTSSMController(wiring.Component):
                     self.perform_idle_handshake  .eq(1)
                 ]
                 m.d.sync += [
+                    Assert(~self.tx_electrical_idle),
+                    Assert(self.engage_terminations),
+                    Assert(~self.perform_rx_detection),
+                    Assert(~self.send_lfps_polling),
+                    Assert(~self.send_tseq_burst),
+                    Assert(~self.train_equalizer),
+                    Assert(~self.send_ts1_burst),
+                    Assert(~self.send_ts2_burst),
                     Assert(self.perform_idle_handshake),
+                    Assert(~self.link_ready),
+                    Assert(~self.act_as_loopback),
                 ]
 
                 # If a hot-reset is being requested, we'll enter Hot Reset.Active.
@@ -551,7 +632,17 @@ class LTSSMController(wiring.Component):
                     self.link_ready         .eq(1)
                 ]
                 m.d.sync += [
+                    Assert(~self.tx_electrical_idle),
+                    Assert(self.engage_terminations),
+                    Assert(~self.perform_rx_detection),
+                    Assert(~self.send_lfps_polling),
+                    Assert(~self.send_tseq_burst),
+                    Assert(~self.train_equalizer),
+                    Assert(~self.send_ts1_burst),
+                    Assert(~self.send_ts2_burst),
+                    Assert(~self.perform_idle_handshake),
                     Assert(self.link_ready),
+                    Assert(~self.act_as_loopback),
                 ]
 
                 # If we've seen an event that requires link recovery, move into link recovery.
@@ -578,7 +669,17 @@ class LTSSMController(wiring.Component):
                     self.send_ts2_burst     .eq(1),
                 ]
                 m.d.sync += [
+                    Assert(~self.tx_electrical_idle),
+                    Assert(self.engage_terminations),
+                    Assert(~self.perform_rx_detection),
+                    Assert(~self.send_lfps_polling),
+                    Assert(~self.send_tseq_burst),
+                    Assert(~self.train_equalizer),
+                    Assert(~self.send_ts1_burst),
                     Assert(self.send_ts2_burst),
+                    Assert(~self.perform_idle_handshake),
+                    Assert(~self.link_ready),
+                    Assert(~self.act_as_loopback),
                 ]
 
                 # If we don't achieve link training within 12mS, we'll assume that we've lost our
@@ -608,7 +709,17 @@ class LTSSMController(wiring.Component):
                     self.perform_idle_handshake  .eq(1)
                 ]
                 m.d.sync += [
+                    Assert(~self.tx_electrical_idle),
+                    Assert(self.engage_terminations),
+                    Assert(~self.perform_rx_detection),
+                    Assert(~self.send_lfps_polling),
+                    Assert(~self.send_tseq_burst),
+                    Assert(~self.train_equalizer),
+                    Assert(~self.send_ts1_burst),
+                    Assert(~self.send_ts2_burst),
                     Assert(self.perform_idle_handshake),
+                    Assert(~self.link_ready),
+                    Assert(~self.act_as_loopback),
                 ]
 
                 # Once we've finished our Idle handshake, we can move on to U0.
@@ -634,7 +745,17 @@ class LTSSMController(wiring.Component):
                 # As in Polling.Active, we'll send TS1s to establish training.
                 m.d.comb += self.send_ts1_burst.eq(1)
                 m.d.sync += [
+                    Assert(~self.tx_electrical_idle),
+                    Assert(self.engage_terminations),
+                    Assert(~self.perform_rx_detection),
+                    Assert(~self.send_lfps_polling),
+                    Assert(~self.send_tseq_burst),
+                    Assert(~self.train_equalizer),
                     Assert(self.send_ts1_burst),
+                    Assert(~self.send_ts2_burst),
+                    Assert(~self.perform_idle_handshake),
+                    Assert(~self.link_ready),
+                    Assert(~self.act_as_loopback),
                 ]
 
                 # If we don't achieve link training within 12mS, we'll assume that we've lost our
@@ -665,7 +786,17 @@ class LTSSMController(wiring.Component):
                 # Constantly send TS2s.
                 m.d.comb += self.send_ts2_burst.eq(1)
                 m.d.sync += [
+                    Assert(~self.tx_electrical_idle),
+                    Assert(self.engage_terminations),
+                    Assert(~self.perform_rx_detection),
+                    Assert(~self.send_lfps_polling),
+                    Assert(~self.send_tseq_burst),
+                    Assert(~self.train_equalizer),
+                    Assert(~self.send_ts1_burst),
                     Assert(self.send_ts2_burst),
+                    Assert(~self.perform_idle_handshake),
+                    Assert(~self.link_ready),
+                    Assert(~self.act_as_loopback),
                 ]
 
                 # If we don't achieve link training within 12mS, we'll assume that we've lost our
@@ -689,7 +820,17 @@ class LTSSMController(wiring.Component):
                 # Continue to send TS2s...
                 m.d.comb += self.send_ts2_burst.eq(1)
                 m.d.sync += [
+                    Assert(~self.tx_electrical_idle),
+                    Assert(self.engage_terminations),
+                    Assert(~self.perform_rx_detection),
+                    Assert(~self.send_lfps_polling),
+                    Assert(~self.send_tseq_burst),
+                    Assert(~self.train_equalizer),
+                    Assert(~self.send_ts1_burst),
                     Assert(self.send_ts2_burst),
+                    Assert(~self.perform_idle_handshake),
+                    Assert(~self.link_ready),
+                    Assert(~self.act_as_loopback),
                 ]
 
                 # ... until we've sent a full burst of 16; at which point we can advance.
@@ -708,7 +849,17 @@ class LTSSMController(wiring.Component):
                     self.perform_idle_handshake  .eq(1)
                 ]
                 m.d.sync += [
+                    Assert(~self.tx_electrical_idle),
+                    Assert(self.engage_terminations),
+                    Assert(~self.perform_rx_detection),
+                    Assert(~self.send_lfps_polling),
+                    Assert(~self.send_tseq_burst),
+                    Assert(~self.train_equalizer),
+                    Assert(~self.send_ts1_burst),
+                    Assert(~self.send_ts2_burst),
                     Assert(self.perform_idle_handshake),
+                    Assert(~self.link_ready),
+                    Assert(~self.act_as_loopback),
                 ]
 
                 # If a hot-reset is being requested, we'll enter Hot Reset.Active.
@@ -740,6 +891,20 @@ class LTSSMController(wiring.Component):
             with m.State("Compliance"):
                 handle_warm_resets()
 
+                m.d.sync += [
+                    Assert(~self.tx_electrical_idle),
+                    Assert(self.engage_terminations),
+                    Assert(~self.perform_rx_detection),
+                    Assert(~self.send_lfps_polling),
+                    Assert(~self.send_tseq_burst),
+                    Assert(~self.train_equalizer),
+                    Assert(~self.send_ts1_burst),
+                    Assert(~self.send_ts2_burst),
+                    Assert(~self.perform_idle_handshake),
+                    Assert(~self.link_ready),
+                    Assert(~self.act_as_loopback),
+                ]
+
                 # We don't currently handle Compliance properly. In this case, this message refers
                 # to the Compliance state, but this also makes us non-compliant, so this statement
                 # has an especially appropriate double meaning.
@@ -755,6 +920,16 @@ class LTSSMController(wiring.Component):
                 handle_warm_resets()
                 m.d.comb += self.act_as_loopback.eq(1)
                 m.d.sync += [
+                    Assert(~self.tx_electrical_idle),
+                    Assert(self.engage_terminations),
+                    Assert(~self.perform_rx_detection),
+                    Assert(~self.send_lfps_polling),
+                    Assert(~self.send_tseq_burst),
+                    Assert(~self.train_equalizer),
+                    Assert(~self.send_ts1_burst),
+                    Assert(~self.send_ts2_burst),
+                    Assert(~self.perform_idle_handshake),
+                    Assert(~self.link_ready),
                     Assert(self.act_as_loopback),
                 ]
 
@@ -769,6 +944,16 @@ class LTSSMController(wiring.Component):
                 m.d.comb += self.tx_electrical_idle.eq(1),
                 m.d.sync += [
                     Assert(self.tx_electrical_idle),
+                    Assert(self.engage_terminations),
+                    Assert(~self.perform_rx_detection),
+                    Assert(~self.send_lfps_polling),
+                    Assert(~self.send_tseq_burst),
+                    Assert(~self.train_equalizer),
+                    Assert(~self.send_ts1_burst),
+                    Assert(~self.send_ts2_burst),
+                    Assert(~self.perform_idle_handshake),
+                    Assert(~self.link_ready),
+                    Assert(~self.act_as_loopback),
                 ]
                 transition_on_timeout(12e-3, to="SS.Inactive.Disconnect.Detect")
 
@@ -784,7 +969,16 @@ class LTSSMController(wiring.Component):
                 ]
                 m.d.sync += [
                     Assert(self.tx_electrical_idle),
-                    Assert(self.perform_rx_detection)
+                    Assert(self.engage_terminations),
+                    Assert(self.perform_rx_detection),
+                    Assert(~self.send_lfps_polling),
+                    Assert(~self.send_tseq_burst),
+                    Assert(~self.train_equalizer),
+                    Assert(~self.send_ts1_burst),
+                    Assert(~self.send_ts2_burst),
+                    Assert(~self.perform_idle_handshake),
+                    Assert(~self.link_ready),
+                    Assert(~self.act_as_loopback),
                 ]
 
                 # If we detect a link partner, we're still in our non-recoverable state.
@@ -809,7 +1003,16 @@ class LTSSMController(wiring.Component):
                 ]
                 m.d.sync += [
                     Assert(self.tx_electrical_idle),
-                    Assert(~self.engage_terminations)
+                    Assert(~self.engage_terminations),
+                    Assert(~self.perform_rx_detection),
+                    Assert(~self.send_lfps_polling),
+                    Assert(~self.send_tseq_burst),
+                    Assert(~self.train_equalizer),
+                    Assert(~self.send_ts1_burst),
+                    Assert(~self.send_ts2_burst),
+                    Assert(~self.perform_idle_handshake),
+                    Assert(~self.link_ready),
+                    Assert(~self.act_as_loopback),
                 ]
 
                 # FIXME: transition to SS.Disabled.Error if we get here three times without success.
@@ -826,7 +1029,16 @@ class LTSSMController(wiring.Component):
                 ]
                 m.d.sync += [
                     Assert(self.tx_electrical_idle),
-                    Assert(~self.engage_terminations)
+                    Assert(~self.engage_terminations),
+                    Assert(~self.perform_rx_detection),
+                    Assert(~self.send_lfps_polling),
+                    Assert(~self.send_tseq_burst),
+                    Assert(~self.train_equalizer),
+                    Assert(~self.send_ts1_burst),
+                    Assert(~self.send_ts2_burst),
+                    Assert(~self.perform_idle_handshake),
+                    Assert(~self.link_ready),
+                    Assert(~self.act_as_loopback),
                 ]
 
         m.d.comb += self.fsm_state.eq(fsm.state)
