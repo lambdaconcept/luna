@@ -284,7 +284,7 @@ class LTSSMController(wiring.Component):
                     # our PHY has started up; so the other side doesn't start LFPS polling, yet.
                     self.engage_terminations  .eq(0)
                 ]
-                m.d.comb += [
+                m.d.sync += [
                     Assert(self.tx_electrical_idle),
                     Assert(~self.engage_terminations)
                 ]
@@ -305,7 +305,7 @@ class LTSSMController(wiring.Component):
                     self.tx_electrical_idle    .eq(1),
                     self.perform_rx_detection  .eq(1)
                 ]
-                m.d.comb += [
+                m.d.sync += [
                     Assert(self.tx_electrical_idle),
                     Assert(self.perform_rx_detection)
                 ]
@@ -321,7 +321,7 @@ class LTSSMController(wiring.Component):
             # continuous detections.
             with m.State("Rx.Detect.Quiet"):
                 m.d.comb += self.tx_electrical_idle.eq(1)
-                m.d.comb += [
+                m.d.sync += [
                     Assert(self.tx_electrical_idle),
                 ]
 
@@ -337,14 +337,14 @@ class LTSSMController(wiring.Component):
             # establish initial DC characteristics. [USB 3.2r1: 7.5.4.3]
             with m.State("Polling.LFPS"):
                 m.d.comb += self.tx_electrical_idle.eq(1)
-                m.d.comb += [
+                m.d.sync += [
                     Assert(self.tx_electrical_idle),
                 ]
 
 
                 # Continuously send our LFPS polling.
                 m.d.comb += self.send_lfps_polling.eq(1)
-                m.d.comb += [
+                m.d.sync += [
                     Assert(self.send_lfps_polling),
                 ]
 
@@ -397,13 +397,13 @@ class LTSSMController(wiring.Component):
 
                 # Continuously send TSEQs; these are used to perform receiver equalization training.
                 m.d.comb += self.send_tseq_burst.eq(1)
-                m.d.comb += [
+                m.d.sync += [
                     Assert(self.send_tseq_burst),
                 ]
 
                 # Request our physical layer to perform equalization training.
                 m.d.comb += self.train_equalizer.eq(1)
-                m.d.comb += [
+                m.d.sync += [
                     Assert(self.train_equalizer),
                 ]
 
@@ -421,7 +421,7 @@ class LTSSMController(wiring.Component):
                 # Constantly send TS1s; which indicate that we're in link training, but haven't yet
                 # seen enough TS1s to move forward with training.
                 m.d.comb += self.send_ts1_burst.eq(1)
-                m.d.comb += [
+                m.d.sync += [
                     Assert(self.send_ts1_burst),
                 ]
 
@@ -465,7 +465,7 @@ class LTSSMController(wiring.Component):
                 # Constantly send TS2s, which both allow the other side to continue link training and
                 # advertise that our side has completed link training itself.
                 m.d.comb += self.send_ts2_burst.eq(1)
-                m.d.comb += [
+                m.d.sync += [
                     Assert(self.send_ts2_burst),
                 ]
 
@@ -489,7 +489,7 @@ class LTSSMController(wiring.Component):
 
                 # Continue to send TS2s...
                 m.d.comb += self.send_ts2_burst.eq(1)
-                m.d.comb += [
+                m.d.sync += [
                     Assert(self.send_ts2_burst),
                 ]
 
@@ -511,7 +511,7 @@ class LTSSMController(wiring.Component):
                     # Generate our IDL handshake.
                     self.perform_idle_handshake  .eq(1)
                 ]
-                m.d.comb += [
+                m.d.sync += [
                     Assert(self.perform_idle_handshake),
                 ]
 
@@ -529,7 +529,7 @@ class LTSSMController(wiring.Component):
                 # synchronized scrambler state and that the other side has stopped sending TS2s.
                 with m.Elif(self.idle_handshake_complete):
                     m.d.comb += self.entering_u0.eq(1)
-                    m.d.comb += [
+                    m.d.sync += [
                         Assert(self.entering_u0),
                     ]
                     transition_to_state("U0")
@@ -550,7 +550,7 @@ class LTSSMController(wiring.Component):
                     self.enable_scrambling  .eq(~self.request_no_scrambling & ~disable_scrambling_seen),
                     self.link_ready         .eq(1)
                 ]
-                m.d.comb += [
+                m.d.sync += [
                     Assert(self.link_ready),
                 ]
 
@@ -577,7 +577,7 @@ class LTSSMController(wiring.Component):
                 m.d.comb += [
                     self.send_ts2_burst     .eq(1),
                 ]
-                m.d.comb += [
+                m.d.sync += [
                     Assert(self.send_ts2_burst),
                 ]
 
@@ -607,14 +607,14 @@ class LTSSMController(wiring.Component):
                     # Generate our IDL handshake.
                     self.perform_idle_handshake  .eq(1)
                 ]
-                m.d.comb += [
+                m.d.sync += [
                     Assert(self.perform_idle_handshake),
                 ]
 
                 # Once we've finished our Idle handshake, we can move on to U0.
                 with m.If(self.idle_handshake_complete):
                     m.d.comb += self.entering_u0.eq(1)
-                    m.d.comb += [
+                    m.d.sync += [
                         Assert(self.entering_u0),
                     ]
                     transition_to_state("U0")
@@ -633,7 +633,7 @@ class LTSSMController(wiring.Component):
 
                 # As in Polling.Active, we'll send TS1s to establish training.
                 m.d.comb += self.send_ts1_burst.eq(1)
-                m.d.comb += [
+                m.d.sync += [
                     Assert(self.send_ts1_burst),
                 ]
 
@@ -664,7 +664,7 @@ class LTSSMController(wiring.Component):
 
                 # Constantly send TS2s.
                 m.d.comb += self.send_ts2_burst.eq(1)
-                m.d.comb += [
+                m.d.sync += [
                     Assert(self.send_ts2_burst),
                 ]
 
@@ -688,7 +688,7 @@ class LTSSMController(wiring.Component):
 
                 # Continue to send TS2s...
                 m.d.comb += self.send_ts2_burst.eq(1)
-                m.d.comb += [
+                m.d.sync += [
                     Assert(self.send_ts2_burst),
                 ]
 
@@ -707,7 +707,7 @@ class LTSSMController(wiring.Component):
                     self.enable_scrambling       .eq(~self.request_no_scrambling & ~disable_scrambling_seen),
                     self.perform_idle_handshake  .eq(1)
                 ]
-                m.d.comb += [
+                m.d.sync += [
                     Assert(self.perform_idle_handshake),
                 ]
 
@@ -725,7 +725,7 @@ class LTSSMController(wiring.Component):
                 # synchronized scrambler state and that the other side has stopped sending TS2s.
                 with m.Elif(self.idle_handshake_complete):
                     m.d.comb += self.entering_u0.eq(1)
-                    m.d.comb += [
+                    m.d.sync += [
                         Assert(self.entering_u0),
                     ]
                     transition_to_state("U0")
@@ -754,7 +754,7 @@ class LTSSMController(wiring.Component):
             with m.State("Loopback"):
                 handle_warm_resets()
                 m.d.comb += self.act_as_loopback.eq(1)
-                m.d.comb += [
+                m.d.sync += [
                     Assert(self.act_as_loopback),
                 ]
 
@@ -767,7 +767,7 @@ class LTSSMController(wiring.Component):
                 handle_warm_resets()
 
                 m.d.comb += self.tx_electrical_idle.eq(1),
-                m.d.comb += [
+                m.d.sync += [
                     Assert(self.tx_electrical_idle),
                 ]
                 transition_on_timeout(12e-3, to="SS.Inactive.Disconnect.Detect")
@@ -782,7 +782,7 @@ class LTSSMController(wiring.Component):
                     self.tx_electrical_idle    .eq(1),
                     self.perform_rx_detection  .eq(1)
                 ]
-                m.d.comb += [
+                m.d.sync += [
                     Assert(self.tx_electrical_idle),
                     Assert(self.perform_rx_detection)
                 ]
@@ -807,7 +807,7 @@ class LTSSMController(wiring.Component):
                     self.tx_electrical_idle    .eq(1),
                     self.engage_terminations   .eq(0)
                 ]
-                m.d.comb += [
+                m.d.sync += [
                     Assert(self.tx_electrical_idle),
                     Assert(~self.engage_terminations)
                 ]
@@ -824,7 +824,7 @@ class LTSSMController(wiring.Component):
                     self.tx_electrical_idle    .eq(1),
                     self.engage_terminations   .eq(0)
                 ]
-                m.d.comb += [
+                m.d.sync += [
                     Assert(self.tx_electrical_idle),
                     Assert(~self.engage_terminations)
                 ]
