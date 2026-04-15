@@ -13,11 +13,11 @@
 import math
 
 from amaranth import *
-from amaranth.lib.cdc  import PulseSynchronizer
+from amaranth.lib import wiring
+from amaranth.lib.wiring import In, Out
 
 
-
-class LTSSMController(Elaboratable):
+class LTSSMController(wiring.Component):
     """ Link Training and Status State Machine
 
     This state machine orchestrates USB bringup, link training, and power saving.
@@ -53,70 +53,59 @@ class LTSSMController(Elaboratable):
         If True, the requirements will be relaxed from the USB3 specification, in order
         to make things work a little more easily on a variety of PHYs and setups.
     """
+    power_on_reset: Out(1)
+    link_ready: Out(1)
+    in_usb_reset: In(1)
+    entering_u0: Out(1)
 
-    def __init__(self, ss_clock_frequency=125e6, *, loosen_requirements=True):
-        self._clock_frequency = ss_clock_frequency
+    trigger_link_recovery: In(1)
+
+    phy_ready: In(1)
+
+    tx_electrical_idle: Out(1, reset=1)
+    engage_terminations: Out(1, reset=1)  # Actually it's rx_termination…
+    invert_rx_polarity: Out(1)
+    train_equalizer: Out(1)
+    disable_scrambling: Out(1)
+
+    perform_rx_detection: Out(1)
+    link_partner_detected: In(1)
+    no_link_partner_detected: In(1)
+
+    lfps_polling_detected: In(1)
+    send_lfps_polling: Out(1)
+    lfps_cycles_sent: Out(16)
+
+    tseq_detected: In(1)
+    ts1_detected: In(1)
+    inverted_ts1_detected: In(1)
+    ts2_detected: In(1)
+
+    hot_reset_requested: In(1)
+    loopback_requested: In(1)
+    no_scrambling_requested: In(1)
+
+    send_tseq_burst: Out(1)
+    send_ts1_burst: Out(1)
+    send_ts2_burst: Out(1)
+    ts_burst_complete: In(1)
+    request_hot_reset: Out(1)
+    request_no_scrambling: Out(1)
+
+    enable_scrambling: Out(1)
+    perform_idle_handshake: Out(1)
+    idle_handshake_complete: In(1)
+
+    act_as_loopback: Out(1)
+    emit_compliance_pattern: Out(1)
+
+    fsm_state: Out(5)
+
+    def __init__(self, sync_clock_frequency=60e6, ss_clock_frequency=125e6, *, loosen_requirements=True):
+        self._sync_clock_frequency = sync_clock_frequency
+        self._ss_clock_frequency = ss_clock_frequency
         self._loosen_requirements = loosen_requirements
-
-        #
-        # I/O port.
-        #
-        self.power_on_reset            = Signal()
-
-        self.link_ready                = Signal()
-        self.in_usb_reset              = Signal()
-        self.entering_u0               = Signal()
-
-        # External event controls.
-        self.trigger_link_recovery     = Signal()
-
-        # Power states.
-        self.phy_ready                 = Signal()
-
-        # Link control signals.
-        self.tx_electrical_idle        = Signal()
-        self.engage_terminations       = Signal()
-        self.invert_rx_polarity        = Signal()
-        self.train_equalizer           = Signal()
-        self.disable_scrambling        = Signal()
-
-        # Receiver detection.
-        self.perform_rx_detection      = Signal()
-        self.link_partner_detected     = Signal()
-        self.no_link_partner_detected  = Signal()
-
-        # LFPS detection / emission.
-        self.lfps_polling_detected     = Signal()
-        self.send_lfps_polling         = Signal()
-        self.lfps_cycles_sent          = Signal(16)
-
-        # Training set detection signals.
-        self.tseq_detected             = Signal()
-        self.ts1_detected              = Signal()
-        self.inverted_ts1_detected     = Signal()
-        self.ts2_detected              = Signal()
-
-        self.hot_reset_requested       = Signal()
-        self.loopback_requested        = Signal()
-        self.no_scrambling_requested   = Signal()
-
-        # Training set generation signals.
-        self.send_tseq_burst           = Signal()
-        self.send_ts1_burst            = Signal()
-        self.send_ts2_burst            = Signal()
-        self.ts_burst_complete         = Signal()
-        self.request_hot_reset         = Signal()
-        self.request_no_scrambling     = Signal()
-
-        # Late-stage link management; physical layer control.
-        self.enable_scrambling         = Signal()
-        self.perform_idle_handshake    = Signal()
-        self.idle_handshake_complete   = Signal()
-
-        # Loopback & compliance.
-        self.act_as_loopback           = Signal()
-        self.emit_compliance_pattern   = Signal()
-
+        super().__init__()
 
 
     def elaborate(self, platform):
