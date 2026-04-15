@@ -15,7 +15,7 @@ import math
 from amaranth import *
 from amaranth.lib import wiring
 from amaranth.lib.wiring import In, Out
-
+from amaranth.sim import Simulator, Period
 
 class LTSSMController(wiring.Component):
     """ Link Training and Status State Machine
@@ -829,4 +829,351 @@ class LTSSMController(wiring.Component):
                     Assert(~self.engage_terminations)
                 ]
 
+        m.d.comb += self.fsm_state.eq(fsm.state)
+        self._state_encoding = dict(fsm.encoding)
+
         return m
+
+
+def test_ltssm_controller():
+    # Use a low ss_clock_frequency so that timeouts are short (in cycle counts).
+    # At 10 kHz:  2ms=20 cycles, 12ms=120 cycles, 360ms=3600 cycles
+    dut = LTSSMController(ss_clock_frequency=10e3)
+    sim = Simulator(dut)
+    sim.add_clock(Period(MHz=1), domain="ss")
+
+    # After Simulator() calls elaborate(), encoding is available.
+    S = dut._state_encoding
+
+    async def tb(ctx):
+        tick = ctx.tick("ss")
+
+        def state():
+            return ctx.get(dut.fsm_state)
+
+        def clear_inputs():
+            """Reset all input signals to their inactive values."""
+            ctx.set(dut.in_usb_reset, False)
+            ctx.set(dut.phy_ready, False)
+            ctx.set(dut.trigger_link_recovery, False)
+            ctx.set(dut.link_partner_detected, False)
+            ctx.set(dut.no_link_partner_detected, False)
+            ctx.set(dut.lfps_polling_detected, False)
+            ctx.set(dut.tseq_detected, False)
+            ctx.set(dut.ts1_detected, False)
+            ctx.set(dut.inverted_ts1_detected, False)
+            ctx.set(dut.ts2_detected, False)
+            ctx.set(dut.hot_reset_requested, False)
+            ctx.set(dut.loopback_requested, False)
+            ctx.set(dut.no_scrambling_requested, False)
+            ctx.set(dut.ts_burst_complete, False)
+            ctx.set(dut.idle_handshake_complete, False)
+            ctx.set(dut.lfps_cycles_sent, 0)
+
+        async def wait_state(expected, max_ticks=6000):
+            """Wait until FSM reaches the expected state."""
+            for _ in range(max_ticks):
+                if state() == expected:
+                    return
+                await tick
+            assert False, f"Timeout waiting for state {expected}, got {state()}"
+
+        # Helper: do a full link bringup from Rx.Detect.Active to U0
+        async def bringup_to_u0():
+            """Drive inputs to bring the link from Rx.Detect.Active all the way to U0."""
+            # Rx.Detect.Active → Polling.LFPS
+            ctx.set(dut.link_partner_detected, True)
+            await tick
+            ctx.set(dut.link_partner_detected, False)
+            await wait_state(S["Polling.LFPS"])
+
+            # Polling.LFPS → Polling.RxEQ (loosen_requirements path)
+            ctx.set(dut.lfps_cycles_sent, 20)
+            ctx.set(dut.ts1_detected, True)
+            await tick
+            ctx.set(dut.ts1_detected, False)
+            ctx.set(dut.lfps_cycles_sent, 0)
+            await wait_state(S["Polling.RxEQ"])
+
+            # Polling.RxEQ → Polling.Active
+            ctx.set(dut.ts_burst_complete, True)
+            await tick
+            ctx.set(dut.ts_burst_complete, False)
+            await wait_state(S["Polling.Active"])
+
+            # Polling.Active → Polling.Configuration
+            # Need burst_minimum_met (set via ts_burst_complete) AND ts1_detected
+            ctx.set(dut.ts_burst_complete, True)
+            await tick  # burst_minimum_met gets set on this edge
+            # But entry tasks clear burst_minimum_met, so wait for it to propagate
+            await tick  # now burst_minimum_met is 1
+            ctx.set(dut.ts1_detected, True)
+            await tick
+            ctx.set(dut.ts1_detected, False)
+            ctx.set(dut.ts_burst_complete, False)
+            await wait_state(S["Polling.Configuration"])
+
+            # Polling.Configuration → Polling.Configuration.Exit
+            # Need ts2_seen (from ts2_detected) AND ts_burst_complete
+            ctx.set(dut.ts2_detected, True)
+            await tick  # ts2_seen gets set
+            ctx.set(dut.ts2_detected, False)
+            ctx.set(dut.ts_burst_complete, True)
+            await tick
+            ctx.set(dut.ts_burst_complete, False)
+            await wait_state(S["Polling.Configuration.Exit"])
+
+            # Polling.Configuration.Exit → Polling.Idle
+            ctx.set(dut.ts_burst_complete, True)
+            await tick
+            ctx.set(dut.ts_burst_complete, False)
+            await wait_state(S["Polling.Idle"])
+
+            # Polling.Idle → U0
+            ctx.set(dut.idle_handshake_complete, True)
+            await tick
+            ctx.set(dut.idle_handshake_complete, False)
+            await wait_state(S["U0"])
+
+        # Helper: go through recovery to the Recovery.Idle state
+        async def recovery_to_idle():
+            """From Recovery.Active, go through to Recovery.Idle."""
+            # Recovery.Active → Recovery.Configuration
+            ctx.set(dut.ts_burst_complete, True)
+            await tick
+            await tick  # burst_minimum_met set
+            ctx.set(dut.ts1_detected, True)
+            await tick
+            ctx.set(dut.ts1_detected, False)
+            ctx.set(dut.ts_burst_complete, False)
+            await wait_state(S["Recovery.Configuration"])
+
+            # Recovery.Configuration → Recovery.Configuration.Exit
+            ctx.set(dut.ts2_detected, True)
+            await tick
+            ctx.set(dut.ts2_detected, False)
+            ctx.set(dut.ts_burst_complete, True)
+            await tick
+            ctx.set(dut.ts_burst_complete, False)
+            await wait_state(S["Recovery.Configuration.Exit"])
+
+            # Recovery.Configuration.Exit → Recovery.Idle
+            ctx.set(dut.ts_burst_complete, True)
+            await tick
+            ctx.set(dut.ts_burst_complete, False)
+            await wait_state(S["Recovery.Idle"])
+
+        clear_inputs()
+
+        # ====================================================================
+        # 1. Rx.Detect.Reset (initial state)
+        # ====================================================================
+        await tick.repeat(3)
+        assert state() == S["Rx.Detect.Reset"], f"Expected Rx.Detect.Reset, got {state()}"
+
+        # ====================================================================
+        # 2. Rx.Detect.Reset → Rx.Detect.Active
+        # ====================================================================
+        ctx.set(dut.phy_ready, True)
+        await tick.repeat(2)
+        assert state() == S["Rx.Detect.Active"], f"Expected Rx.Detect.Active, got {state()}"
+
+        # ====================================================================
+        # 3. Rx.Detect.Active → Rx.Detect.Quiet (no partner detected)
+        # ====================================================================
+        ctx.set(dut.no_link_partner_detected, True)
+        await tick
+        ctx.set(dut.no_link_partner_detected, False)
+        await wait_state(S["Rx.Detect.Quiet"])
+
+        # ====================================================================
+        # 4. Rx.Detect.Quiet → Rx.Detect.Active (12ms timeout = 120 cycles)
+        # ====================================================================
+        await wait_state(S["Rx.Detect.Active"])
+
+        # ====================================================================
+        # 5. Rx.Detect.Active → Polling.LFPS → (timeout) → Compliance
+        #    (polling_seen is False since lfps_polling_detected was never set)
+        # ====================================================================
+        ctx.set(dut.link_partner_detected, True)
+        await tick
+        ctx.set(dut.link_partner_detected, False)
+        await wait_state(S["Polling.LFPS"])
+
+        # Wait for 360ms timeout → Compliance
+        await wait_state(S["Compliance"])
+
+        # ====================================================================
+        # 6. Compliance → Rx.Detect.Reset (immediate transition)
+        # ====================================================================
+        await wait_state(S["Rx.Detect.Reset"])
+
+        # ====================================================================
+        # 7. → Rx.Detect.Active → Polling.LFPS → (timeout) → SS.Disabled.Default
+        #    (set lfps_polling_detected so polling_seen becomes True)
+        # ====================================================================
+        await wait_state(S["Rx.Detect.Active"])
+        ctx.set(dut.link_partner_detected, True)
+        await tick
+        ctx.set(dut.link_partner_detected, False)
+        await wait_state(S["Polling.LFPS"])
+
+        # Set lfps_polling_detected once so polling_seen latches
+        ctx.set(dut.lfps_polling_detected, True)
+        await tick
+        ctx.set(dut.lfps_polling_detected, False)
+
+        # Wait for 360ms timeout → SS.Disabled.Default (since polling_seen is True)
+        await wait_state(S["SS.Disabled.Default"])
+
+        # ====================================================================
+        # 8.  Warm reset out of SS.Disabled.Default → Rx.Detect.Reset
+        # ====================================================================
+        ctx.set(dut.in_usb_reset, True)
+        await tick.repeat(2)
+        assert state() == S["Rx.Detect.Reset"]
+        ctx.set(dut.in_usb_reset, False)
+
+        # ====================================================================
+        # 9. Full bringup: Rx.Detect.Reset → ... → U0
+        #    (visits Polling.RxEQ, Polling.Active, Polling.Configuration,
+        #     Polling.Configuration.Exit, Polling.Idle, U0)
+        # ====================================================================
+        await wait_state(S["Rx.Detect.Active"])
+        await bringup_to_u0()
+
+        # ====================================================================
+        # 10. U0 → Recovery.Active → ... → Recovery.Idle → U0
+        #     (visits Recovery.Active, Recovery.Configuration,
+        #      Recovery.Configuration.Exit, Recovery.Idle)
+        # ====================================================================
+        ctx.set(dut.trigger_link_recovery, True)
+        await tick
+        ctx.set(dut.trigger_link_recovery, False)
+        await wait_state(S["Recovery.Active"])
+
+        await recovery_to_idle()
+
+        # Recovery.Idle → U0
+        ctx.set(dut.idle_handshake_complete, True)
+        await tick
+        ctx.set(dut.idle_handshake_complete, False)
+        await wait_state(S["U0"])
+
+        # ====================================================================
+        # 11. U0 → Recovery → Recovery.Idle → Hot Reset.Active → Hot Reset.Exit → U0
+        # ====================================================================
+        ctx.set(dut.trigger_link_recovery, True)
+        await tick
+        ctx.set(dut.trigger_link_recovery, False)
+        await wait_state(S["Recovery.Active"])
+
+        # Set hot_reset_requested during recovery so hot_reset_seen latches
+        ctx.set(dut.hot_reset_requested, True)
+        await tick
+        ctx.set(dut.hot_reset_requested, False)
+
+        await recovery_to_idle()
+
+        # Recovery.Idle → Hot Reset.Active (hot_reset_seen is set)
+        await wait_state(S["Hot Reset.Active"])
+
+        # Hot Reset.Active → Hot Reset.Exit
+        # Need ts_burst_complete AND ts2_seen AND ~hot_reset_requested
+        ctx.set(dut.ts2_detected, True)
+        await tick  # ts2_seen latches
+        ctx.set(dut.ts2_detected, False)
+        ctx.set(dut.ts_burst_complete, True)
+        await tick
+        ctx.set(dut.ts_burst_complete, False)
+        await wait_state(S["Hot Reset.Exit"])
+
+        # Hot Reset.Exit → U0
+        ctx.set(dut.idle_handshake_complete, True)
+        await tick
+        ctx.set(dut.idle_handshake_complete, False)
+        await wait_state(S["U0"])
+
+        # ====================================================================
+        # 12. U0 → Recovery → Recovery.Idle → Loopback
+        # ====================================================================
+        ctx.set(dut.trigger_link_recovery, True)
+        await tick
+        ctx.set(dut.trigger_link_recovery, False)
+        await wait_state(S["Recovery.Active"])
+
+        # Set loopback_requested so loopback_seen latches
+        ctx.set(dut.loopback_requested, True)
+        await tick
+        ctx.set(dut.loopback_requested, False)
+
+        await recovery_to_idle()
+
+        # Recovery.Idle → Loopback (loopback_seen is set)
+        await wait_state(S["Loopback"])
+
+        # ====================================================================
+        # 13. Loopback → Rx.Detect.Reset (warm reset) → bringup → U0
+        #     then Recovery.Active timeout → SS.Inactive.Quiet
+        #     → SS.Inactive.Disconnect.Detect
+        # ====================================================================
+        ctx.set(dut.in_usb_reset, True)
+        await tick.repeat(2)
+        assert state() == S["Rx.Detect.Reset"]
+        ctx.set(dut.in_usb_reset, False)
+
+        await wait_state(S["Rx.Detect.Active"])
+        await bringup_to_u0()
+
+        # U0 → Recovery.Active
+        ctx.set(dut.trigger_link_recovery, True)
+        await tick
+        ctx.set(dut.trigger_link_recovery, False)
+        await wait_state(S["Recovery.Active"])
+
+        # Let Recovery.Active time out (12ms = 120 cycles) → SS.Inactive.Quiet
+        await wait_state(S["SS.Inactive.Quiet"])
+
+        # SS.Inactive.Quiet → SS.Inactive.Disconnect.Detect (12ms timeout)
+        await wait_state(S["SS.Inactive.Disconnect.Detect"])
+
+        # SS.Inactive.Disconnect.Detect → Rx.Detect.Quiet (no partner)
+        ctx.set(dut.no_link_partner_detected, True)
+        await tick
+        ctx.set(dut.no_link_partner_detected, False)
+        await wait_state(S["Rx.Detect.Quiet"])
+
+        # ====================================================================
+        # Summary: all FSM states visited
+        # ====================================================================
+        # Rx.Detect.Reset           - step 1
+        # Rx.Detect.Active          - step 2
+        # Rx.Detect.Quiet           - step 3
+        # Polling.LFPS              - step 5
+        # Compliance                - step 5
+        # SS.Disabled.Default       - step 7
+        # Polling.RxEQ              - step 9
+        # Polling.Active            - step 9
+        # Polling.Configuration     - step 9
+        # Polling.Configuration.Exit- step 9
+        # Polling.Idle              - step 9
+        # U0                        - step 9
+        # Recovery.Active           - step 10
+        # Recovery.Configuration    - step 10
+        # Recovery.Configuration.Exit - step 10
+        # Recovery.Idle             - step 10
+        # Hot Reset.Active          - step 11
+        # Hot Reset.Exit            - step 11
+        # Loopback                  - step 12
+        # SS.Inactive.Quiet         - step 13
+        # SS.Inactive.Disconnect.Detect - step 13
+        #
+        # Not visited (unreachable in current code):
+        # SS.Disabled.Error         - no transition leads here (FIXME in source)
+
+    sim.add_testbench(tb)
+    with sim.write_vcd("ltssm_controller.vcd"):
+        sim.run()
+
+if __name__ == "__main__":
+    test_ltssm_controller()
