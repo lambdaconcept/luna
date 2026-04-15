@@ -125,7 +125,7 @@ class LTSSMController(wiring.Component):
 
         # Create a timer that can count up to at least 360mS, the largest LTSSM state timeout.
         # [USB 3.2r1: 7.5]
-        cycles_in_360mS = int(math.ceil(360e-3 * self._clock_frequency))
+        cycles_in_360mS = int(math.ceil(360e-3 * self._ss_clock_frequency))
         cycles_in_state = Signal(range(cycles_in_360mS + 1))
 
         # Count by default; this will be automatically cleared on state transitions.
@@ -193,7 +193,7 @@ class LTSSMController(wiring.Component):
             """ FSM helper that adds a state transition that is automatically invoked after a timeout. """
 
             # Figure out how many cycles need to pass before we consider ourselves timed out.
-            timeout_in_cycles = int(math.ceil(timeout * self._clock_frequency))
+            timeout_in_cycles = int(math.ceil(timeout * self._ss_clock_frequency))
 
             # If we've reached that many cycles, transition to the target state.
             with m.If(cycles_in_state == timeout_in_cycles):
