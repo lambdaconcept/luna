@@ -405,14 +405,21 @@ class USBRequestHandlerMultiplexer(Elaboratable):
         m.submodules.encoder = encoder = Encoder(len(self._interfaces))
         m.d.comb += encoder.i.eq(Cat(interface.claim for interface in self._interfaces))
 
+        select   = Signal.like(encoder.o)
+        select_n = Signal(reset=1)
+        m.d.usb += [
+            select  .eq(encoder.o),
+            select_n.eq(encoder.n),
+        ]
+
         # Connect the interface outputs to the interface that claims them.
-        with m.Switch(encoder.o):
+        with m.Switch(select):
             for index, interface in enumerate(self._interfaces):
                 with m.Case(index):
                     _connect_interface_outputs(interface)
 
         # Use the fallback handler interface for the invalid case.
-        with m.If(encoder.n):
+        with m.If(select_n):
             _connect_interface_outputs(self._fallback)
         
         return m
