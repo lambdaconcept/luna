@@ -108,12 +108,31 @@ class StandardRequestHandler(ControlRequestHandler):
 
 
         #
+        # SETUP decode.
+        #
+        # The SETUP packet is latched and stable for the whole control transfer,
+        # so decode it into registers: this keeps the type / blacklist / feature
+        # compares out of the claim, TX and handshake paths. `received` is
+        # delayed by one cycle to stay aligned with the registered decode.
+        type_standard        = Signal()
+        blacklisted          = Signal()
+        received             = Signal()
+        clear_feature_stall  = Signal()
+        m.d.usb += [
+            type_standard       .eq(setup.type == USBRequestType.STANDARD),
+            blacklisted         .eq(functools.reduce(operator.__or__, (f(setup) for f in self._blacklist), Const(0))),
+            received            .eq(setup.received),
+            # For now, we only implement clearing ENDPOINT_HALT.
+            clear_feature_stall .eq((setup.recipient != USBRequestRecipient.ENDPOINT) |
+                                    (setup.value     != USBStandardFeatures.ENDPOINT_HALT)),
+        ]
+
+        #
         # Handlers.
         #
-        with m.If(setup.type == USBRequestType.STANDARD):
+        with m.If(type_standard):
 
             # Only handle setup packet if not blacklisted
-            blacklisted = functools.reduce(operator.__or__, (f(setup) for f in self._blacklist), Const(0))
             m.d.comb += interface.claim.eq(~blacklisted)
 
             with m.FSM(domain="usb"):
@@ -130,7 +149,7 @@ class StandardRequestHandler(ControlRequestHandler):
                     ]
 
                     # If we've received a new setup packet, handle it.
-                    with m.If(setup.received):
+                    with m.If(received):
 
                         with m.If(~blacklisted):
 
@@ -165,11 +184,7 @@ class StandardRequestHandler(ControlRequestHandler):
                     with m.If(interface.status_requested):
 
                         # If our stall condition is met, stall; otherwise, send a ZLP [USB 8.5.3].
-                        # For now, we only implement clearing ENDPOINT_HALT.
-                        stall_condition = \
-                            (setup.recipient != USBRequestRecipient.ENDPOINT) | \
-                            (setup.value     != USBStandardFeatures.ENDPOINT_HALT)
-                        with m.If(stall_condition):
+                        with m.If(clear_feature_stall):
                             m.d.comb += handshake_generator.stall.eq(1)
                         with m.Else():
                             m.d.comb += self.send_zlp()

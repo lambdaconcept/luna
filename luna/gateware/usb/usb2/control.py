@@ -18,6 +18,83 @@ from ..request.standard    import StandardRequestHandler
 from ..stream              import USBInStreamInterface, USBOutStreamInterface
 
 
+class USBInStreamSkidBuffer(Elaboratable):
+    """ Fully registered stage for a USBInStreamInterface (2-entry skid buffer).
+
+    source.valid/first/last/payload and sink.ready all come from flip-flops;
+    full throughput, so a continuous packet on the sink stays continuous on the
+    source (required by USBInStreamInterface: valid held from first to last).
+
+    Zero-length packets are signalled out-of-band in LUNA: a single-cycle
+    ``valid & last`` pulse without ``first``, which the data packet generator
+    reacts to without ever asserting ``ready``. Such a beat (outside of a
+    packet) is presented on the source for exactly one cycle and then dropped,
+    reproducing the original pulse semantics.
+    """
+
+    def __init__(self):
+        self.sink   = USBInStreamInterface()
+        self.source = USBInStreamInterface()
+
+    def elaborate(self, platform):
+        m = Module()
+        sink, source = self.sink, self.source
+
+        out_valid   = Signal()
+        out_first   = Signal()
+        out_last    = Signal()
+        out_payload = Signal.like(source.payload)
+
+        skid_valid   = Signal()
+        skid_first   = Signal()
+        skid_last    = Signal()
+        skid_payload = Signal.like(sink.payload)
+
+        # Whether the source is currently in the middle of a packet.
+        in_packet = Signal()
+
+        out_is_zlp = out_valid & out_last & ~out_first & ~in_packet
+        consume    = (out_valid & source.ready) | out_is_zlp
+
+        m.d.comb += [
+            source.valid   .eq(out_valid),
+            source.first   .eq(out_first),
+            source.last    .eq(out_last),
+            source.payload .eq(out_payload),
+            sink.ready     .eq(~skid_valid),
+        ]
+
+        # Track packet boundaries on the source side.
+        with m.If(out_valid & source.ready & ~out_is_zlp):
+            m.d.usb += in_packet.eq(~out_last)
+
+        with m.If(consume | ~out_valid):
+            with m.If(skid_valid):
+                m.d.usb += [
+                    out_valid   .eq(1),
+                    out_first   .eq(skid_first),
+                    out_last    .eq(skid_last),
+                    out_payload .eq(skid_payload),
+                    skid_valid  .eq(0),
+                ]
+            with m.Else():
+                m.d.usb += [
+                    out_valid   .eq(sink.valid),
+                    out_first   .eq(sink.first),
+                    out_last    .eq(sink.last),
+                    out_payload .eq(sink.payload),
+                ]
+        with m.Elif(sink.valid & ~skid_valid):
+            m.d.usb += [
+                skid_valid   .eq(1),
+                skid_first   .eq(sink.first),
+                skid_last    .eq(sink.last),
+                skid_payload .eq(sink.payload),
+            ]
+
+        return m
+
+
 class USBControlEndpoint(Elaboratable):
     """ Gateware that manages control request data progression.
 
@@ -164,12 +241,15 @@ class USBControlEndpoint(Elaboratable):
             request_mux.add_interface(handler.interface)
 
 
+        m.submodules.tx_buffer = tx_buffer = USBInStreamSkidBuffer()
+
         # ... and hook it up.
         m.d.comb += [
             setup_decoder.packet                   .connect(request_handler.setup),
             interface.tokenizer                    .connect(request_handler.tokenizer),
 
-            request_handler.tx                     .attach(interface.tx),
+            request_handler.tx                     .attach(tx_buffer.sink),
+            tx_buffer.source                       .attach(interface.tx),
             interface.handshakes_out.ack           .eq(setup_decoder.ack | request_handler.handshakes_out.ack),
             interface.handshakes_out.nak           .eq(request_handler.handshakes_out.nak),
             interface.handshakes_out.stall         .eq(request_handler.handshakes_out.stall),
@@ -195,6 +275,15 @@ class USBControlEndpoint(Elaboratable):
         # Behavior dictated by [USB2, 8.5.3].
         #
         endpoint_targeted = (self.interface.tokenizer.endpoint == self._endpoint_number)
+        data_requested        = Signal()
+        status_requested      = Signal()
+        rx_ready_for_response = Signal()
+        m.d.usb += [
+            request_handler.data_requested        .eq(data_requested),
+            request_handler.status_requested      .eq(status_requested),
+            request_handler.rx_ready_for_response .eq(rx_ready_for_response),
+        ]
+
         with m.FSM(domain="usb"):
 
             # SETUP -- The "SETUP" phase of a control request. We'll wait here
@@ -229,7 +318,7 @@ class USBControlEndpoint(Elaboratable):
                 with m.If(allowed_to_respond & interface.tokenizer.is_in):
 
                     # Notify the request handler to prepare a response.
-                    m.d.comb += request_handler.data_requested.eq(1)
+                    m.d.comb += data_requested.eq(1)
 
                 # Once we get an OUT token, we should move on to the STATUS stage. [USB2, 8.5.3]
                 with m.If(endpoint_targeted & interface.tokenizer.new_token & (interface.tokenizer.is_out | interface.tokenizer.is_ping)):
@@ -246,7 +335,7 @@ class USBControlEndpoint(Elaboratable):
                 with m.If(endpoint_targeted & interface.tokenizer.is_out):
                     m.d.comb += [
                         interface.rx                           .connect(request_handler.rx),
-                        request_handler.rx_ready_for_response  .eq(interface.rx_ready_for_response),
+                        rx_ready_for_response                  .eq(interface.rx_ready_for_response),
                         request_handler.rx_invalid             .eq(interface.rx_invalid),
                     ]
 
@@ -270,7 +359,7 @@ class USBControlEndpoint(Elaboratable):
                 # Notify the target handler.
                 allowed_to_respond = interface.tokenizer.ready_for_response & endpoint_targeted
                 with m.If(allowed_to_respond & interface.tokenizer.is_in):
-                    m.d.comb += request_handler.status_requested.eq(1)
+                    m.d.comb += status_requested.eq(1)
 
 
             # STATUS_OUT -- We're currently in the status stage, and we're expecting the DATA packet for
@@ -281,7 +370,7 @@ class USBControlEndpoint(Elaboratable):
                 # Once we've received a new DATA packet, we're ready to handle a status request.
                 allowed_to_respond = interface.rx_ready_for_response & endpoint_targeted
                 with m.If(allowed_to_respond & interface.tokenizer.is_out):
-                    m.d.comb += request_handler.status_requested.eq(1)
+                    m.d.comb += status_requested.eq(1)
 
                 # Respond to PING token [USB2.0: 8.5.1]
                 with m.If(endpoint_targeted & interface.tokenizer.ready_for_response & interface.tokenizer.is_ping):
