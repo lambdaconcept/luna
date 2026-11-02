@@ -18,6 +18,83 @@ from ..request.standard    import StandardRequestHandler
 from ..stream              import USBInStreamInterface, USBOutStreamInterface
 
 
+class USBInStreamSkidBuffer(Elaboratable):
+    """ Fully registered stage for a USBInStreamInterface (2-entry skid buffer).
+
+    source.valid/first/last/payload and sink.ready all come from flip-flops;
+    full throughput, so a continuous packet on the sink stays continuous on the
+    source (required by USBInStreamInterface: valid held from first to last).
+
+    Zero-length packets are signalled out-of-band in LUNA: a single-cycle
+    ``valid & last`` pulse without ``first``, which the data packet generator
+    reacts to without ever asserting ``ready``. Such a beat (outside of a
+    packet) is presented on the source for exactly one cycle and then dropped,
+    reproducing the original pulse semantics.
+    """
+
+    def __init__(self):
+        self.sink   = USBInStreamInterface()
+        self.source = USBInStreamInterface()
+
+    def elaborate(self, platform):
+        m = Module()
+        sink, source = self.sink, self.source
+
+        out_valid   = Signal()
+        out_first   = Signal()
+        out_last    = Signal()
+        out_payload = Signal.like(source.payload)
+
+        skid_valid   = Signal()
+        skid_first   = Signal()
+        skid_last    = Signal()
+        skid_payload = Signal.like(sink.payload)
+
+        # Whether the source is currently in the middle of a packet.
+        in_packet = Signal()
+
+        out_is_zlp = out_valid & out_last & ~out_first & ~in_packet
+        consume    = (out_valid & source.ready) | out_is_zlp
+
+        m.d.comb += [
+            source.valid   .eq(out_valid),
+            source.first   .eq(out_first),
+            source.last    .eq(out_last),
+            source.payload .eq(out_payload),
+            sink.ready     .eq(~skid_valid),
+        ]
+
+        # Track packet boundaries on the source side.
+        with m.If(out_valid & source.ready & ~out_is_zlp):
+            m.d.usb += in_packet.eq(~out_last)
+
+        with m.If(consume | ~out_valid):
+            with m.If(skid_valid):
+                m.d.usb += [
+                    out_valid   .eq(1),
+                    out_first   .eq(skid_first),
+                    out_last    .eq(skid_last),
+                    out_payload .eq(skid_payload),
+                    skid_valid  .eq(0),
+                ]
+            with m.Else():
+                m.d.usb += [
+                    out_valid   .eq(sink.valid),
+                    out_first   .eq(sink.first),
+                    out_last    .eq(sink.last),
+                    out_payload .eq(sink.payload),
+                ]
+        with m.Elif(sink.valid & ~skid_valid):
+            m.d.usb += [
+                skid_valid   .eq(1),
+                skid_first   .eq(sink.first),
+                skid_last    .eq(sink.last),
+                skid_payload .eq(sink.payload),
+            ]
+
+        return m
+
+
 class USBControlEndpoint(Elaboratable):
     """ Gateware that manages control request data progression.
 
