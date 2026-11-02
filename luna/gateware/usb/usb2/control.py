@@ -275,6 +275,15 @@ class USBControlEndpoint(Elaboratable):
         # Behavior dictated by [USB2, 8.5.3].
         #
         endpoint_targeted = (self.interface.tokenizer.endpoint == self._endpoint_number)
+        data_requested        = Signal()
+        status_requested      = Signal()
+        rx_ready_for_response = Signal()
+        m.d.usb += [
+            request_handler.data_requested        .eq(data_requested),
+            request_handler.status_requested      .eq(status_requested),
+            request_handler.rx_ready_for_response .eq(rx_ready_for_response),
+        ]
+
         with m.FSM(domain="usb"):
 
             # SETUP -- The "SETUP" phase of a control request. We'll wait here
@@ -309,7 +318,7 @@ class USBControlEndpoint(Elaboratable):
                 with m.If(allowed_to_respond & interface.tokenizer.is_in):
 
                     # Notify the request handler to prepare a response.
-                    m.d.comb += request_handler.data_requested.eq(1)
+                    m.d.comb += data_requested.eq(1)
 
                 # Once we get an OUT token, we should move on to the STATUS stage. [USB2, 8.5.3]
                 with m.If(endpoint_targeted & interface.tokenizer.new_token & (interface.tokenizer.is_out | interface.tokenizer.is_ping)):
@@ -326,7 +335,7 @@ class USBControlEndpoint(Elaboratable):
                 with m.If(endpoint_targeted & interface.tokenizer.is_out):
                     m.d.comb += [
                         interface.rx                           .connect(request_handler.rx),
-                        request_handler.rx_ready_for_response  .eq(interface.rx_ready_for_response),
+                        rx_ready_for_response                  .eq(interface.rx_ready_for_response),
                         request_handler.rx_invalid             .eq(interface.rx_invalid),
                     ]
 
@@ -350,7 +359,7 @@ class USBControlEndpoint(Elaboratable):
                 # Notify the target handler.
                 allowed_to_respond = interface.tokenizer.ready_for_response & endpoint_targeted
                 with m.If(allowed_to_respond & interface.tokenizer.is_in):
-                    m.d.comb += request_handler.status_requested.eq(1)
+                    m.d.comb += status_requested.eq(1)
 
 
             # STATUS_OUT -- We're currently in the status stage, and we're expecting the DATA packet for
@@ -361,7 +370,7 @@ class USBControlEndpoint(Elaboratable):
                 # Once we've received a new DATA packet, we're ready to handle a status request.
                 allowed_to_respond = interface.rx_ready_for_response & endpoint_targeted
                 with m.If(allowed_to_respond & interface.tokenizer.is_out):
-                    m.d.comb += request_handler.status_requested.eq(1)
+                    m.d.comb += status_requested.eq(1)
 
                 # Respond to PING token [USB2.0: 8.5.1]
                 with m.If(endpoint_targeted & interface.tokenizer.ready_for_response & interface.tokenizer.is_ping):
