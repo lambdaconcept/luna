@@ -241,12 +241,15 @@ class USBControlEndpoint(Elaboratable):
             request_mux.add_interface(handler.interface)
 
 
+        m.submodules.tx_buffer = tx_buffer = USBInStreamSkidBuffer()
+
         # ... and hook it up.
         m.d.comb += [
             setup_decoder.packet                   .connect(request_handler.setup),
             interface.tokenizer                    .connect(request_handler.tokenizer),
 
-            request_handler.tx                     .attach(interface.tx),
+            request_handler.tx                     .attach(tx_buffer.sink),
+            tx_buffer.source                       .attach(interface.tx),
             interface.handshakes_out.ack           .eq(setup_decoder.ack | request_handler.handshakes_out.ack),
             interface.handshakes_out.nak           .eq(request_handler.handshakes_out.nak),
             interface.handshakes_out.stall         .eq(request_handler.handshakes_out.stall),
